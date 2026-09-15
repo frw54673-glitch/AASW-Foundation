@@ -1,0 +1,171 @@
+.member-term-progress.soon,
+.member-term-progress.urgent {
+  border-color: #efc1bd;
+  background: linear-gradient(135deg, #fff4f2, #fffdf8);
+}
+
+.member-term-progress.soon span,
+.member-term-progress.urgent span {
+  color: #a52d27;
+}
+
+.member-term-progress.soon strong,
+.member-term-progress.urgent strong {
+  color: #7f201c;
+}
+
+.member-term-progress.soon small,
+.member-term-progress.urgent small,
+.member-term-progress.soon .member-term-progress-dates,
+.member-term-progress.urgent .member-term-progress-dates {
+  color: #8a4b47;
+}
+
+.member-term-progress.soon .member-term-progress-track,
+.member-term-progress.urgent .member-term-progress-track {
+  background: #f3d9d6;
+}
+
+.member-term-progress.soon .member-term-progress-track i,
+.member-term-progress.urgent .member-term-progress-track i {
+  background: linear-gradient(90deg, #b42318, #e56a54);
+}
+
+.member-term-progress-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.member-term-progress-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.member-term-urgency-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: end;
+  gap: 8px 10px;
+}
+
+.member-term-renew-now {
+  display: inline-flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #8f241e;
+  border-radius: 8px;
+  background: #b42318;
+  padding: 0 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 160ms cubic-bezier(.23, 1, .32, 1), transform 160ms cubic-bezier(.23, 1, .32, 1), box-shadow 160ms cubic-bezier(.23, 1, .32, 1);
+}
+
+.member-term-renew-now:hover,
+.member-term-renew-now:focus-visible {
+  background: #8f241e;
+  box-shadow: 0 7px 16px rgba(143, 36, 30, .18);
+  transform: translateY(-1px);
+}
+
+.member-term-renew-now:active { transform: scale(.97); }
+.member-term-renew-now:focus-visible { outline: 3px solid rgba(180, 35, 24, .24); outline-offset: 3px; }
+
+.member-term-benefits-link {
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: #8f241e;
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.member-term-benefits-link:hover { color: #5f1713; }
+.member-term-benefits-link:focus-visible { outline: 3px solid rgba(180, 35, 24, .24); outline-offset: 4px; }
+
+.member-term-progress-track-wrap { position: relative; }
+.member-term-progress-track { cursor: help; }
+.member-term-progress-track:focus-visible { outline: 3px solid rgba(180, 35, 24, .25); outline-offset: 3px; }
+
+.member-term-progress-tooltip {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(100% + 9px);
+  left: 0;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 80px));
+  border: 1px solid #6f1d1a;
+  border-radius: 7px;
+  background: #3b1715;
+  padding: 8px 10px;
+  color: #fffaf7;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 150ms cubic-bezier(.23, 1, .32, 1), transform 150ms cubic-bezier(.23, 1, .32, 1);
+}
+
+.member-term-progress-track:hover + .member-term-progress-tooltip,
+.member-term-progress-track:focus-visible + .member-term-progress-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes member-term-urgency-pulse {
+  0%, 100% { opacity: 1; transform: scaleY(1); }
+  50% { opacity: .74; transform: scaleY(1.18); }
+}
+
+@keyframes member-term-renew-entrance {
+  from { opacity: 0; transform: translateY(5px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .member-term-progress.soon .member-term-progress-track i,
+  .member-term-progress.urgent .member-term-progress-track i {
+    transform-origin: center;
+    animation: member-term-urgency-pulse 1.7s cubic-bezier(.77, 0, .175, 1) infinite;
+  }
+
+  .member-term-renew-now { animation: member-term-renew-entrance 240ms cubic-bezier(.23, 1, .32, 1) both; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .member-term-progress.soon .member-term-progress-track i,
+  .member-term-progress.urgent .member-term-progress-track i,
+  .member-term-renew-now { animation: none; transition: none; }
+}
+
+@media (max-width: 560px) {
+  .member-term-progress-heading { align-items: stretch; flex-direction: column; }
+  .member-term-renew-now { width: 100%; }
+  .member-term-urgency-actions { align-items: stretch; flex-direction: column; }
+  .member-term-benefits-link { width: fit-content; }
+  .member-term-progress-tooltip { width: min(100%, 290px); }
+}
+
+.member-renewal-benefits-dialog { border-color: #e7c7c2; background: #fffaf7; }
+.member-renewal-benefits-dialog > button { width: fit-content; border: 0; border-radius: 8px; background: #8f241e; padding: 10px 15px; color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
+.member-renewal-benefits-dialog > button:hover { background: #6f1d1a; }
+.member-renewal-benefits-dialog [data-slot="dialog-header"] > p { margin: 0; color: #a52d27; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.member-renewal-benefits-dialog ul { display: grid; gap: 9px; margin: 4px 0; padding: 0; list-style: none; }
+.member-renewal-benefits-dialog li { display: flex; gap: 8px; align-items: start; color: #4c3835; font-size: 13px; line-height: 1.45; }
+.member-renewal-benefits-dialog li svg { flex: 0 0 auto; margin-top: 1px; color: #a52d27; }
+.member-renewal-benefits-policy { margin: 0; border-left: 3px solid #b42318; background: #fff1ef; padding: 10px 12px; color: #754440; font-size: 12px; line-height: 1.5; }

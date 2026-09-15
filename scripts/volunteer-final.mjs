@@ -1,0 +1,26 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true });
+const v = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const net = [];
+v.on("response", r => { if (r.url().includes("volunteer")) net.push(r.status() + " " + decodeURIComponent(r.url().split("3000")[1] || "").slice(0, 80)); });
+await v.goto("http://localhost:3000/volunteer", { waitUntil: "networkidle", timeout: 30000 });
+await v.waitForTimeout(1500);
+await v.fill('[name="fullName"]', "E2E Volunteer User");
+await v.fill('[name="email"]', "e2e-volunteer@aaswfoundation.test");
+await v.fill('[name="phone"]', "9876543210");
+await v.selectOption('[name="state"]', "Uttar Pradesh");
+await v.fill('[name="city"]', "Lucknow");
+await v.fill('[name="availability"]', "Weekends");
+await v.fill('[name="skills"]', "Teaching, community outreach");
+await v.fill('[name="interests"]', "Digital literacy for women");
+await v.click("form button[type=submit]");
+await v.waitForTimeout(4500);
+const res = await v.evaluate(() => {
+  const refEl = document.querySelector(".membership-application-success, [class*=success]");
+  const formGone = !document.querySelector("form.membership-application-form");
+  const ref = document.body.innerText.match(/[A-Z]+-[A-Z]+-\d+|application reference|ref[^.]{0,40}/i)?.[0];
+  return { formGone, successBlock: refEl ? refEl.textContent.trim().slice(0, 250) : null, refMatch: ref };
+});
+console.log("VOLUNTEER FINAL:", JSON.stringify(res, null, 1));
+console.log("NET:", JSON.stringify(net));
+await browser.close();

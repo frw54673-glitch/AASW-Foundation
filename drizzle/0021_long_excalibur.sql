@@ -1,0 +1,1 @@
+ALTER TABLE `membership_applications` ADD `panHash` varchar(64);

@@ -1,0 +1,51 @@
+import { chromium } from "playwright";
+import { q, one, pool } from "./db-helpers.mjs";
+import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
+import fs from "node:fs";
+
+const EMAIL = "grace.e2e@aaswfoundation.test";
+const PASSWORD = "AaswTest#2026";
+const joining = new Date(Date.now() - 366 * 86400000);
+const jStr = joining.toISOString().slice(0, 10);
+const expStr = new Date(joining.getTime() + 364 * 86400000).toISOString().slice(0, 10);
+const envText = fs.readFileSync(".env", "utf8");
+const key = crypto.createHash("sha256").update(envText.match(/PII_ENCRYPTION_KEY=(.*)/)?.[1]?.trim()).digest();
+const PAN = "ZZZZZ9999Y";
+const panHash = crypto.createHmac("sha256", key).update(PAN, "utf8").digest("hex");
+const iv = crypto.randomBytes(12);
+const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+const panEncrypted = `v1.${iv.toString("base64url")}.${Buffer.concat([cipher.update(PAN, "utf8"), cipher.final(), cipher.getAuthTag()]).toString("base64url")}`;
+await q("DELETE FROM member_membership_cycles WHERE memberId IN (SELECT id FROM (SELECT id FROM members WHERE email = ?) t)", [EMAIL]).catch(() => {});
+await q("DELETE FROM members WHERE email = ?", [EMAIL]).catch(() => {});
+await q("DELETE FROM membership_applications WHERE email = ?", [EMAIL]).catch(() => {});
+await q("INSERT INTO membership_applications (applicationRef, fullName, email, phone, city, state, district, membershipType, panEncrypted, panHash, panLastFour, idProofType, idProofStorageKey, idProofOriginalName, idProofMimeType, status, notificationStatus) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'approved', 'sent')", ["AASW-MEM-GRACE-E2E", "Portal Grace Member", EMAIL, "9876543213", "Lucknow", "Uttar Pradesh", "Lucknow", "annual", panEncrypted, panHash, PAN.slice(-4), "aadhaar", "k", "k.png", "image/png"]);
+await q("INSERT INTO members (applicationRef, membershipNo, fullName, email, phone, memberType, city, state, district, joiningDate, status, accountStatus, passwordHash, mustChangePassword) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)", ["AASW-MEM-GRACE-E2E", "AASW-2026-9003", "Portal Grace Member", EMAIL, "9876543213", "annual", "Lucknow", "Uttar Pradesh", "Lucknow", jStr, "active", "active", bcrypt.hashSync(PASSWORD, 12)]);
+const m = await one("SELECT id FROM members WHERE email = ?", [EMAIL]);
+await q("INSERT INTO member_membership_cycles (memberId, applicationRef, cycleNumber, membershipType, startsOn, expiresOn, status) VALUES (?,?,1,'annual',?,?,'active')", [m.id, "AASW-MEM-GRACE-E2E", jStr, expStr]);
+
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+await page.goto("http://localhost:3000/member/login", { waitUntil: "domcontentloaded" });
+await page.fill('input[autocomplete="username"]', EMAIL);
+await page.fill('input[autocomplete="current-password"]', PASSWORD);
+await page.click('button:has-text("Sign in")');
+await page.waitForURL("**/member/dashboard**", { timeout: 25000 });
+await page.waitForTimeout(3500);
+// go to "My membership" section by clicking nav buttons and reading each heading
+const sections = await page.evaluate(() => Array.from(document.querySelectorAll(".member-sidebar nav button")).map(b => b.textContent.trim()));
+const idx = sections.findIndex(s => /membership/i.test(s) && !/history/i.test(s));
+await page.evaluate(i => { document.querySelectorAll(".member-sidebar nav button")[i].click(); }, idx);
+await page.waitForTimeout(1800);
+const memText = await page.evaluate(() => document.querySelector(".member-sidebar-section")?.innerText ?? "");
+const lines = memText.split("\n").filter(l => /grace|renew|day|expired|valid|term|countdown/i.test(l)).slice(0, 14);
+console.log("=== MY MEMBERSHIP SECTION (grace member) ===");
+for (const l of lines) console.log("  | " + l.trim());
+const renewLink = await page.$(".member-renew-link");
+console.log("renew-link element:", renewLink ? await renewLink.getAttribute("href") : "null");
+// cleanup
+await q("DELETE FROM member_membership_cycles WHERE memberId = ?", [m.id]);
+await q("DELETE FROM members WHERE email = ?", [EMAIL]);
+await q("DELETE FROM membership_applications WHERE email = ?", [EMAIL]);
+await browser.close();
+await pool.end();

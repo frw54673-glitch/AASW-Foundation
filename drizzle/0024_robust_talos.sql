@@ -1,0 +1,1 @@
+ALTER TABLE `members` ADD `foundationUpdatesOptIn` boolean DEFAULT true NOT NULL;

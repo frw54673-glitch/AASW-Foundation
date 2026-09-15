@@ -1,0 +1,1 @@
+ALTER TABLE `foundation_admin_alerts` DROP FOREIGN KEY `fk_admin_alert_application`;

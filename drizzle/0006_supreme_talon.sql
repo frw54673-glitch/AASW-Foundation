@@ -1,0 +1,1 @@
+ALTER TABLE `gallery_media` ADD `displayOrder` int DEFAULT 0 NOT NULL;

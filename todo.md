@@ -1,0 +1,396 @@
+# Inner pages redesign checklist
+
+- [x] Audit the existing Programs, Team, Reports, Governance, Stories, Updates, Membership, Donate and policy content.
+- [x] Define a shared editorial inner-page shell with header, chapter rail, hero, content sections and footer.
+- [x] Implement the Programs page with program cards, outcomes and clear support actions.
+- [x] Implement the Team page using only existing source team data and portraits.
+- [x] Implement the Reports page with transparent report/resource cards and contact fallback.
+- [x] Implement Governance, Stories, Updates, Membership, Donate and policy pages in the same design system.
+- [x] Add routes, responsive navigation, accessible landmarks, keyboard focus states and metadata for all inner pages.
+- [x] Run TypeScript/build checks and capture desktop/mobile visual QA screenshots.
+- [x] Save a final checkpoint and hand off the updated project.
+- [x] Preserve the approved website pages while resolving the full-stack upgrade conflicts.
+- [x] Add a payment transaction schema and apply the database migration.
+- [x] Implement server-side Razorpay order creation and checkout signature verification.
+- [x] Implement an idempotent Razorpay webhook endpoint that verifies raw-body signatures.
+- [x] Add Donation and Membership checkout forms with clear amount, supporter details, loading, success and failure states.
+- [x] Add test coverage for demo payment inputs and no-charge receipt state transitions.
+- [x] Defer live Razorpay credential and webhook configuration until the user supplies the credentials; demo checkout remains the active safe mode.
+- [x] Extract and verify the official About Us, mission, work, governance and team content from the supplied ZIP source.
+- [x] Create a detailed About page that combines About Us, Our Work and Our Team in the approved editorial design system.
+- [x] Update primary navigation so About is the first institutional information destination.
+- [x] Add source-backed team profiles and programme summaries without inventing facts or testimonials.
+- [x] Run TypeScript, tests, production build and desktop/mobile visual QA for the About experience.
+- [x] Verify the source ZIP team-photo inventory and map available official portraits to the named team roster.
+- [x] Replace the About-page name-only roster with source-backed team profile cards that display the available official photos.
+- [x] Run TypeScript, tests, production build and desktop/mobile visual QA for the expanded About team gallery.
+- [x] Extract and verify official individual roles/designations and Digital Trainer real names from the supplied ZIP source.
+- [x] Update every gallery profile card with source-backed designation metadata and replace trainer placeholders with verified names.
+- [x] Add accessible social media link placeholders and smooth reduced-motion-safe hover interactions to all team profile cards.
+- [x] Run TypeScript, tests, production build and desktop/mobile visual QA for the updated team metadata experience.
+- [x] Verify each displayed portrait card’s exact role from the ZIP and remove any unsupported per-person designation.
+- [x] Capture a fresh mobile visual QA pass for the updated role, trainer-name and social-placeholder experience.
+- [x] Audit existing About navigation links and map them to the current About, Programs, Team, Governance and Reports routes.
+- [x] Implement a reference-style desktop About mega-menu that opens on hover, click and keyboard focus.
+- [x] Add a mobile-friendly expandable About navigation group with the same information hierarchy.
+- [x] Verify mega-menu keyboard navigation, click-outside dismissal, desktop/mobile visual QA and production build.
+- [x] Audit the supplied ZIP for official content that maps to every mega-menu group and detail link.
+- [x] Add dedicated overview pages for Who We Are, What We Do and Transparency.
+- [x] Add separate source-backed pages for Vision & Mission, Digital Skills, Green Entrepreneurship and Mentorship & Community.
+- [x] Update all mega-menu links so group headings and individual items route to their own overview/detail pages.
+- [x] Run TypeScript, unit tests, production build and representative desktop/mobile QA for every new route.
+- [x] Capture mobile visual QA for Who We Are, Transparency, Green Entrepreneurship and Mentorship & Community pages.
+- [x] Audit the live AASW Foundation website and capture official content from every accessible public page.
+- [x] Create a source-to-route content map for the redesigned homepage, overview pages and existing detail pages.
+- [x] Migrate and expand official live-site content across the redesigned routes without inventing facts or testimonials.
+- [x] Run content review, TypeScript, tests, production build and desktop/mobile QA after the migration.
+- [x] Expand the live-site content map into a complete route-by-route mapping for homepage, overview pages and every detail page.
+- [x] Apply or explicitly document verified live-site content coverage for all dedicated overview/detail mega-menu routes.
+- [x] Capture fresh mobile QA for every route materially changed by the live-site content migration.
+- [x] Audit the owner-provided live site and source archive for individual team biographies and social URLs.
+- [x] Add verified profile bios and social links where source data is available; retain clearly labelled placeholders where it is unavailable.
+- [x] Create accessible expanded-profile interactions for every team gallery card without inventing personal information.
+- [x] Run TypeScript, unit tests, production build and desktop/mobile QA for the team profile experience.
+- [x] Confirm that no additional individual bios or personal social URLs will be added for the remaining roster members.
+- [x] Make every team-card social control visibly state that the available links lead to AASW Foundation organisation channels, not personal member profiles.
+- [x] Restrict detailed biographies and social links to Anupam Trivedi and Aparna Mishra only.
+- [x] Remove non-approved expandable profile prompts and organisation social controls from all other member cards.
+- [x] Run TypeScript, tests, production build and desktop/mobile QA for the final two-profile team-gallery scope.
+- [x] Capture a fresh desktop visual QA pass for Team and About after the final two-profile gallery scope change.
+- [x] Audit the current donation route, checkout demo and mega-menu navigation discoverability.
+- [x] Add an explicit Donate / Support the Work destination to the About mega-menu and mobile navigation group.
+- [x] Refine the dedicated donation page with source-backed causes, amount options, trust notes and clear checkout entry.
+- [x] Run TypeScript, tests, production build and desktop/mobile QA for the complete donation journey.
+- [x] Capture fresh mobile QA showing the mobile About navigation group exposes the Donate entry before the donation page route.
+- [x] Audit the current donation status, payment transaction schema and available transactional email delivery options.
+- [x] Confirm Foundation Gmail/Outlook mailbox as the planned receipt sender.
+- [x] Receive the approved Foundation Gmail SMTP sender configuration for application-controlled transactional sending.
+- [x] Add a branded donation thank-you page that clearly distinguishes demo confirmations from verified paid receipts.
+- [x] Implement idempotent receipt generation and transactional email dispatch only after a verified successful Razorpay payment.
+- [x] Add a no-send email preview path for demo payments and tests for receipt eligibility and duplicate-send prevention.
+- [x] Run TypeScript, unit tests, production build and desktop/mobile QA for the thank-you and receipt flow.
+- [x] Run TypeScript, unit tests, production build and visual QA before saving the payment integration checkpoint.
+- [x] Implement explicitly labelled no-charge demo checkout state for donations and memberships.
+- [x] Add reusable supporter detail, amount selection, payment progress and demo success confirmation UI.
+- [x] Ensure every demo payment surface discloses that no money is collected or transferred.
+- [x] Preserve a clean activation boundary so Razorpay credentials can replace demo mode later without redesigning the checkout UI.
+- [x] Add an explicit demo failure state with retry and dismiss handling for donation and membership checkouts.
+- [x] Add a gateway mode contract so a future Razorpay implementation can use the same checkout UI without redesigning it.
+- [x] Extend unit coverage for demo checkout validation, failure and receipt lifecycle helpers.
+- [x] Add a config-selected, gateway-agnostic checkout adapter that keeps demo and future Razorpay execution behind the same interface.
+- [x] Move Membership and Donate ahead of Impact and Transparency across desktop and mobile navigation, while retaining all four destinations.
+- [x] Update navigation unit tests for the swapped primary-header and About-menu hierarchy.
+- [x] Run validation and desktop/mobile QA for the swapped navigation hierarchy.
+- [x] Verify the opened desktop About mega-menu shows Impact and Transparency in the swapped positions.
+- [x] Verify the expanded mobile menu retains primary Membership/Donate and exposes Impact/Transparency under About.
+- [x] Add About-style desktop mega-menu and mobile expandable dropdowns for What We Do and Transparency.
+- [x] Add unit and interaction coverage for What We Do and Transparency dropdown menus.
+- [x] Keep desktop navigation labels and contact number visible without wrapping after adding the new dropdown triggers.
+- [x] Add automated 1280px header-row QA proving all primary labels and the contact number remain on one line.
+- [x] Remove What We Do and Transparency links from the About dropdown while preserving them in their dedicated desktop/mobile dropdowns.
+- [x] Define a source-appropriate public Membership application form with clear consent and privacy guidance.
+- [x] Add a database-backed Membership application record, migration, server validation and public submission procedure.
+- [x] Add a responsive Membership form with inline validation, loading, error and success confirmation states.
+- [x] Add tests and desktop/mobile QA proving valid applications persist and invalid submissions are rejected.
+- [x] Add field-level inline validation messaging for invalid required fields, email, phone and consent.
+- [x] Verify a valid Membership submission creates a real database record without retaining test personal data.
+- [x] Capture interactive success and invalid-submission QA states for the Membership form.
+- [x] Extend Membership applications with mandatory district, PAN number, ID-proof type and secure image/PDF ID-proof upload fields.
+- [x] Add secure server-side ID-proof file intake and private storage references without exposing uploaded documents in public UI.
+- [x] Send a Foundation Gmail notification after a new Membership application is stored, without including uploaded ID documents in the email.
+- [x] Create a distinct Donation form with mandatory donor identity/contact/address fields, Indian State dropdown, ₹2,000/₹4,000/₹8,000/₹16,000 presets and custom amount.
+- [x] Keep Membership application and Donation flows separate, with clear no-charge demo disclosure until live Razorpay is activated.
+- [x] Add Media Centre and Contact Us as dedicated header dropdowns and responsive pages before Membership navigation.
+- [x] Add unit/integration tests and desktop/mobile QA for sensitive uploads, notifications, mandatory forms and new navigation.
+- [x] Update the Privacy page to disclose mandatory Membership identity-document collection and restricted-use handling.
+- [x] Escape applicant-controlled values in Foundation Membership notification HTML before email delivery.
+- [x] Add an end-to-end Membership submission test covering encoded proof handoff, persisted private metadata and notification-status update boundaries.
+- [x] Add automated browser assertions for required Membership identity fields and Donation donor-detail fields before checkout continuation.
+- [x] Audit the owner-provided official Team page for verified member names, displayed roles and portrait sources.
+- [x] Compare the official Team-page roster against the redesigned gallery and add or correct only source-backed names and photos.
+- [x] Run source review, TypeScript, tests and desktop/mobile QA for the updated Team gallery.
+- [x] Add accessible interactive Team filters for Core, Advisory, Trainers and State Council categories.
+- [x] Render a professional editorial default avatar for State Council members without source portraits, clearly avoiding any claim that it is a real photo.
+- [x] Add filter interaction tests and desktop/mobile QA for the updated Team discovery experience.
+- [x] Audit all current header, footer, favicon and site-identity logo references.
+- [x] Upload the user-provided official AASW Foundation logo as a managed web asset and replace all applicable brand marks.
+- [x] Verify the official logo at desktop/mobile header and footer sizes, then run tests and production build.
+- [x] Audit the final official contact, address and map-location details from AASW sources.
+- [x] Audit available authentic AASW field photos for the homepage featured section.
+- [x] Update all affected contact/map surfaces and replace homepage featured placeholders with source-backed field photos.
+- [x] Add coverage and perform desktop/mobile QA for the contact and homepage visual refresh.
+- [x] Audit existing database, storage, email and scheduling support for inquiries and managed photo publishing.
+- [x] Add secure inquiry storage, validation, spam protection and Foundation notification handling.
+- [x] Build a functional Contact Us inquiry form with clear success and error states.
+- [x] Add authenticated field-photo upload, captions, ordering, visibility and quarterly gallery workflow.
+- [x] Create a public field-photo gallery and homepage/gallery discovery path using only published images.
+- [x] Apply database migration, add automated coverage and complete desktop/mobile QA for both workflows.
+- [ ] Configure a secure Foundation Google Drive folder connection for automatic image ingestion.
+- [x] Define Drive-folder eligibility, duplicate handling, publishing safeguards and sync cadence for public gallery photos.
+- [ ] Implement automatic Drive-to-gallery synchronization while preserving a safe public-only media feed.
+- [x] Build the current source-backed public field-photo gallery while Drive credentials are pending.
+- [x] Document the future Google Drive folder connection and automatic sync activation prerequisites.
+- [x] Add an explicit homepage discovery path to the public field-photo gallery and verify it responsively.
+- [x] Diagnose and fix the Membership navigation path that currently opens the Donate experience.
+- [x] Audit all public submission flows and identify missing backend persistence, tracking and management capabilities.
+- [x] Add protected Foundation management APIs and records for membership applications, donations and contact inquiries.
+- [x] Build a secure Foundation admin workspace to review and manage submitted records.
+- [x] Add media management backend support that is compatible with future Drive sync activation.
+- [x] Apply required database migrations, authorization tests and full responsive workflow QA.
+- [x] Add explicit loading, empty, success and error states across Foundation admin record, status-update and media-upload workflows.
+- [ ] Complete authenticated desktop/mobile QA for Foundation record review, status management and media publishing.
+- [ ] Capture end-to-end management workflow evidence before confirming the admin delivery as complete.
+- [ ] Complete authenticated admin QA for field-photo upload, draft/publish/archive and display-order changes on desktop and mobile.
+- [ ] Verify an authenticated published gallery image appears in the public field gallery with the configured order.
+- [x] Resume the deferred owner-authenticated MIS and Foundation admin QA after the Foundation owner signs in.
+- [x] Document and enforce Drive-file duplicate handling by source file ID, including update, skip and conflict rules with regression coverage.
+- [x] Publish a single Foundation-facing Drive sync specification covering folder eligibility, draft-only publishing safeguards, review ownership and configured cadence.
+- [x] Wire the Drive duplicate policy into the future importer database path with source-file lookup and create/update/skip/conflict handling tests.
+- [x] Add live-path regression coverage for Drive importer create, update, archived-skip and manual-conflict outcomes.
+- [x] Complete authenticated dashboard visual QA for alert colours, status filter and command-center tabs after Foundation owner sign-in.
+- [x] Capture authenticated dashboard evidence showing alert states and project-status filtering in use.
+- [x] Add and verify a dashboard project-status filter for focused portfolio review.
+- [x] Audit all existing routes, schema entities, APIs and preserved Foundation website workflows against the complete MIS specification.
+- [x] Add a shared catalog of all 17 UN SDG goals plus Indian currency, number and DD/MM/YYYY date formatting utilities.
+- [x] Add safe generators and uniqueness controls for Project, Beneficiary and Field Event identifiers.
+- [x] Extend user roles and protected permissions for Admin, Project Manager, Field Staff, Finance, Monitoring and Management.
+- [x] Add additive MIS schema and APIs for projects, partners, objectives, target groups, activities and beneficiaries.
+- [x] Render the complete 17-item SDG dropdown/multi-select within the protected project-objective workflow.
+- [x] Enforce persistence-backed project, beneficiary and field-event ID uniqueness in their create workflows.
+- [x] Apply and test role-based authorization in real MIS procedures and management routes for every requested MIS role.
+- [x] Implement MIS Phase 1 protected project identity, partner, SDG-objective, target-group and activity records with validated APIs and project workspace forms.
+- [x] Implement MIS Phase 2 beneficiary, achievement, field-event, output and outcome records with protected delivery workspace forms.
+- [x] Add target achievement, field events, outputs, outcomes, team, finance, documents and monitoring workflows.
+- [x] Add risks, reporting, impact evidence, closure checklist, audit trail and export workflows.
+- [x] Build a role-controlled MIS dashboard, project command-center tabs and responsive administrative UI without breaking public pages.
+- [ ] Apply migrations in reviewed batches, add regression coverage, validate imports/exports and complete authenticated desktop/mobile QA.
+- [x] Audit existing in-app notification and toast usage across public forms and Foundation MIS workflows.
+- [x] Build an accessible AASW-branded custom notification component with success, error, warning and info states.
+- [x] Integrate shared notifications into key public submission and protected MIS action flows.
+- [x] Add notification behavior coverage and desktop/mobile visual QA.
+- [x] Reorganize the Team page into clear Leadership, Central Advisory and State Council sections in All People and relevant filter views.
+- [x] Complete a structured existing-codebase analysis for the member portal specification and obtain confirmation before schema or authentication changes.
+- [x] Extend the immediate member-account core with project assignments, password reset/resend and role-specific member workspaces without replacing existing Manus OAuth access.
+- [x] Add a secure member password reset/resend workflow with one-time token invalidation and Foundation-branded reset email.
+- [x] Add member-to-project assignment records with server-side assignment authorization and Foundation admin controls.
+- [x] Import the user-authorized legacy member account with a hashed credential and private legacy record metadata, then verify secure member login and assignment workflow.
+- [x] Auto-activate a secure member account immediately after a successful membership application, generate a unique AASW membership number and send a one-time password-setup email without waiting for admin approval.
+- [x] Add a clear Member Login entry in the main public-site header that routes to the isolated member portal.
+- [x] Consolidate member-specific assigned projects, active membership details and expiry information into the protected member dashboard.
+- [x] Add a protected, printable membership certificate view that uses only authenticated member data and does not expose other members’ records.
+- [x] Add regression coverage and authenticated desktop/mobile QA for the consolidated member dashboard and certificate experience.
+- [x] Verify the authenticated member dashboard renders the assigned real project and calculated membership expiry from server-owned member data.
+- [x] Add a protected direct PDF certificate download from the member dashboard without exposing private member fields.
+- [x] Replace the signed-in main-header Member Login action with a member initials/profile affordance that links only to that member’s dashboard.
+- [x] Add regression coverage and authenticated responsive QA for member data display, PDF download and signed-in header state.
+- [x] Inspect the owner-provided official AASW membership-certificate PDF template and map its approved dynamic text placements.
+- [x] Replace the generic certificate design with the official template while safely inserting only authenticated member name, Membership ID and plan-specific membership line.
+- [x] Apply the same official template to the protected member certificate preview and direct PDF download flow.
+- [x] Add annual/lifetime membership variation coverage and perform visual/security QA without using the unrelated owner-provided field photo in the certificate.
+- [x] Re-verify dynamic official certificate generation against an authenticated member name and Membership ID after preview restart.
+- [x] Add an accessible, reduced-motion-safe loading animation while the protected member dashboard fetches membership expiry and assigned-project data.
+- [x] Recheck restarted preview accessibility and capture member dashboard/certificate QA evidence without treating platform permission issues as application authorization failures.
+- [x] Capture authenticated desktop/mobile baseline evidence for the current Member Dashboard KPI, two-column and responsive layout.
+- [x] Apply frontend-only Member Dashboard visual polish for sticky header, welcome section, KPI cards, projects/password alignment, certificate and membership-detail sections.
+- [x] Implement requested mobile-only dashboard refinements without changing member APIs, routes, displayed data or backend behavior.
+- [x] Add presentation regression coverage and capture before/after desktop and mobile comparison evidence for the specified dashboard areas.
+- [x] Re-attempt authenticated Foundation admin and MIS dashboard QA using any currently available owner session, without inventing project or media data.
+- [ ] Request the approved Google Drive folder link and service-account access only when the Foundation is ready to activate automatic gallery ingestion.
+- [x] Audit existing protected member data fields and member routes so the sidebar dashboard uses only supported live information and interactions.
+- [x] Replace the dashboard body with a responsive left-sidebar / right-content frontend layout while preserving the existing sticky top header and member APIs.
+- [x] Add client-side persisted tabs for Profile, Membership, Services and Change Password, retaining current certificate/project/password actions and safe coming-soon states where no existing route exists.
+- [x] Add visual regression coverage and authenticated desktop/tablet/mobile QA for the sidebar dashboard, navigation persistence and responsive bottom-tab behavior.
+- [x] Audit existing member storage and validation patterns for a member-owned profile-photo upload without exposing files publicly by default.
+- [x] Add a sidebar Home section with approved AASW Foundation information using the existing source-backed site content.
+- [x] Add accessible hamburger-triggered sidebar collapse/expand behavior for desktop and tablet while preserving mobile bottom tabs.
+- [x] Add a protected member profile-photo upload/update flow with server-side image validation, managed storage and member-only profile rendering.
+- [x] Add migration, authorization/upload regression coverage and authenticated responsive QA for Home, collapse state and profile-photo display.
+- [x] Attach the user-authorized Aviral Trivedi profile photograph only to Membership ID AASW-2026-H1COR through managed storage.
+- [x] Verify the authenticated member sidebar renders the uploaded Aviral photo without exposing it in public site content or other member accounts.
+- [x] Remove the top-header sidebar toggle and move desktop/tablet expand-collapse control to the clickable upper member-sidebar identity area.
+- [x] Verify upper-sidebar click toggles collapse state without changing member navigation actions, mobile bottom tabs or persisted preference behavior.
+- [x] Review the attached AASW content PDF and map approved text to the member Home section without inventing programme facts.
+- [x] Redesign the member Home hero, information cards and colour system into a warmer, more cohesive AASW editorial presentation.
+- [x] Add content/presentation regression coverage and authenticated responsive QA for the updated member Home experience.
+- [x] Replace the Member Home Discover AASW and Explore our programmes outbound links with two dedicated in-dashboard member detail views.
+- [x] Present the approved AASW Foundation and programme content in premium responsive member-only editorial layouts without inventing facts.
+- [x] Add navigation/presentation regression coverage and authenticate the new detail views in browser QA.
+- [x] Add smooth reduced-motion-safe loading transitions to the member Discover AASW and programmes detail pages.
+- [x] Add premium hover and focus interactions for detail-page cards, links and programme icons.
+- [x] Add regression coverage and visually validate the enhanced animation and interaction system.
+- [x] Audit the current Foundation Admin workspace structure, visual hierarchy and component reuse opportunities.
+- [x] Align Foundation Admin headers, tabs, summary cards, filters, tables and media controls into a responsive premium dashboard system.
+- [x] Add admin presentation regression coverage and validate the sign-in gate plus available protected admin rendering without inventing records.
+- [x] Audit existing membership activation, onboarding email and certificate functions against the requested immediate approval experience.
+- [x] Add a secure post-membership welcome/approval email that includes Membership ID, one-time password-setup action and authenticated certificate access.
+- [x] Keep certificates and credentials private by choosing a member-specific secure delivery method rather than attaching reusable public links or plain passwords.
+- [x] Deliver the same member-specific certificate through a short-lived email action while retaining permanent authenticated certificate access in the Member Portal.
+- [x] Add regression coverage and validate the automatic membership approval/email flow without sending test messages to real applicants.
+- [x] Audit current admin-notification capabilities, member approval event boundary and verified Foundation social-link sources.
+- [x] Add a secure Foundation Admin in-app alert for each newly auto-approved membership without exposing private applicant records.
+- [x] Upgrade the membership approval email with the official Foundation logo, professional layout and only verified Foundation social links.
+- [x] Add regression coverage and run TypeScript, complete tests, production build and available browser health checks for the updated flows.
+- [x] Remove the requested Public information, Annual reports, Governance, Policies & privacy and Request information navigation block while preserving remaining valid routes.
+- [x] Add navigation regression coverage and verify the revised member-facing navigation presentation.
+- [x] Audit the member login success redirect and current dashboard loading state for a safe welcome-animation insertion point.
+- [x] Add an official-logo Welcome to AASW Foundation intro with an elegant paper-style rightward dashboard reveal after member login.
+- [x] Add reduced-motion-safe regression coverage and validate the authenticated member login transition without changing credential or session handling.
+- [x] Refine the member-login welcome background with lightweight cinematic motion while preserving performance and reduced-motion safety.
+- [x] Extend the paper-plane sequence and reveal the protected dashboard with a staged fade-in after the plane completes.
+- [x] Add regression coverage and validate the upgraded post-login animation timing and dashboard continuity.
+- [x] Add premium hover and keyboard-focus interactions to Member Dashboard cards and sidebar navigation controls.
+- [x] Add pointer-reactive parallax depth to the Member Login welcome background with mobile and reduced-motion fallbacks.
+- [x] Add interaction regression coverage and validate the enhanced authenticated dashboard presentation.
+- [x] Inventory every public, member, Foundation Admin and MIS route against its API, database and permission boundary.
+- [x] Run an end-to-end functional audit of forms, auto-approval emails, certificates, member dashboard actions and protected data flows without creating fake records.
+- [x] Audit Foundation Admin and MIS working controls, authentication gates, status mutations, imports/exports and media-management behaviour against available real data.
+- [x] Fix verified working/backend gaps, add regression tests and complete application health validation with documented real-data dependencies.
+- [x] Replace the Member Portal My documents, Notifications and Events placeholder service responses with truthful working experiences backed by existing or additive secure data flows.
+- [x] Remove or implement the disabled Keep me signed in control so no visible member-login control is misleading.
+- [x] Define source-backed member service options and create a protected service-request data model with request-status tracking.
+- [x] Add authenticated Member Portal Join a Service form, duplicate-safe request submission and personal request-status view.
+- [x] Add Foundation Admin service-request review controls with protected status updates and no unnecessary member-data exposure.
+- [x] Add regression tests, TypeScript/build validation and responsive QA for the member service-request workflow.
+- [x] Create a protected member support-message data model with member-only conversation visibility and admin review status.
+- [x] Replace the Support card mail action with an accessible in-dashboard support chat box that submits member messages and shows only that member's history.
+- [x] Add a Foundation Admin support inbox for secure message review and status management without exposing unrelated member data.
+- [x] Add regression tests, apply migration, validate TypeScript/build and perform responsive QA for the member support-chat workflow.
+- [x] Verify the reported submitted member message against the correct database table and make Service Requests versus Support Inbox destinations unambiguous in Foundation Admin.
+- [x] Add Foundation Admin response-note controls for programme requests and preserve the response as a member-private update.
+- [x] Display accepted-programme next steps and Foundation response details in the requesting member's service history.
+- [x] Add regression coverage, validate TypeScript/build and verify the request-detail workflow without altering real member content.
+- [x] Define auditable membership-cycle history records and secure renewal matching for the same member account.
+- [x] Enforce membership expiry on member login and protected member actions, while retaining past activity and membership records.
+- [x] Make a renewed Membership application reactivate the existing verified member account with a new membership cycle rather than creating a duplicate account.
+- [ ] Activate and verify the separate daily membership-expiry and seven-day reminder schedules after the site is published, then persist both production task UIDs.
+- [x] Add member/admin membership-history views, regression coverage and validated renewal/expiry workflow evidence without modifying the live member prematurely.
+- [x] Add a prominent remaining-days expiry indicator with an accessible urgency state to the active member dashboard.
+- [x] Add a dedicated Member Portal membership-and-activity history section showing only the signed-in member's past membership cycles, service requests and support activity.
+- [x] Implement one-time, idempotent 7-day membership-expiry email reminder records and Foundation-branded email delivery.
+- [x] Add separate reminder processing into a dedicated daily production callback, add regression coverage and validate without sending a test email to a real member.
+- [x] Add a prominent Renew Membership button in the active member dashboard with expiry-aware accessible guidance.
+- [x] Route the renewal action into the existing secure Membership application flow while preserving same-account email/PAN renewal matching.
+- [x] Add regression coverage, TypeScript/build validation and responsive QA for the dashboard renewal-entry experience.
+- [x] Define a three-day annual membership grace window that preserves private portal access and renewal ability after the displayed expiry date.
+- [x] Defer account deactivation and membership-cycle expiry status until the grace window ends, while keeping daily reconciliation idempotent.
+- [x] Display clear grace-period countdown and renewal guidance in the Member Portal without changing lifetime membership behavior.
+- [x] Add regression coverage, TypeScript/build validation and checkpoint the three-day grace-period lifecycle.
+- [x] Restore a visible, accessible upper-left hamburger control that opens and closes the signed-in member sidebar on mobile phones.
+- [x] Audit official AASW Team portraits against current team-card image mappings and replace blurry references with approved higher-quality source images.
+- [x] Refine responsive team-card image rendering, add regression coverage and validate portrait clarity without inventing or altering team identities.
+- [x] Add face-safe per-portrait crop positioning so official Team faces are fully visible in desktop and mobile cards.
+- [x] Upgrade Our Team card framing, hover/focus interactions and responsive layout while retaining only official portrait sources.
+- [x] Rework the Team leadership and advisory hierarchy into a large, face-forward portrait presentation inspired by the supplied Smile Foundation reference while retaining AASW’s own visual identity.
+- [x] Validate the reference-inspired Team presentation across desktop and mobile with source-backed portrait integrity and accessible hover/focus behaviour.
+- [x] Upgrade Central Advisory to the same large, face-forward premium portrait hierarchy as Leadership, with responsive card sizing and authentic source images.
+- [x] Upgrade Digital Trainers to the same large, face-forward premium portrait hierarchy as Leadership and Central Advisory, with responsive card sizing and authentic source images.
+- [x] Improve the official Patron portrait with a face-safe, professional treatment consistent with the upgraded Team hierarchy.
+- [x] Resize the Patron official portrait into a larger Founder-matched face-forward frame and adjust its background box so the image sits correctly within the card.
+- [x] Diagnose and fix the reported homepage tRPC “Failed to fetch” error with resilient handling and regression validation.
+- [x] Remove the green Patron card background while retaining the current larger framed official photo treatment.
+- [x] Restructure Contact Us into an AASW Get in Touch page inspired by the supplied reference, using only verified AASW contact details and preserving the live helpdesk inquiry flow.
+- [x] Change the Contact Us hero to Reach the Foundation and add Get in Touch as a distinct direct-contact section beneath it.
+- [x] Remove “Reach the Foundation” from Contact Us and restore Get in Touch as the primary verified AASW contact heading.
+- [x] Diagnose and fix the homepage tRPC response returning HTML instead of JSON, with reliable preview-route handling and regression validation.
+- [x] Replace the Contact Us dropdown’s Reach the Foundation group with a Get in Touch group containing verified Email AASW and Call AASW actions.
+- [x] Replace the Contact Us official location map destination with the owner-provided AASW Google Maps URL.
+- [x] Improve dark-green Contact Us official-location panel contrast so all text and actions remain readable.
+- [x] Run a reproducible application health audit covering tests, TypeScript, production build and current runtime logs.
+- [x] Verify representative public, member, Foundation Admin and MIS route rendering without creating fabricated records.
+- [x] Fix any verified regression found during the health audit and revalidate the affected flow (no new defect was verified).
+- [x] Perform a deep contract audit of route registration, tRPC/API procedures, access-control guards and database workflow dependencies.
+- [x] Run non-destructive authenticated browser checks for member, Foundation Admin and MIS critical journeys, including direct-route access boundaries.
+- [x] Fix and regression-test any verified deep-audit issue, then rerun automated and production validation.
+- [x] Increase sitewide text weight with a consistent typography system across public pages, Member Portal, Foundation Admin and MIS.
+- [x] Verify bold typography remains readable and responsive across representative desktop and mobile routes.
+- [x] Run a full mobile responsiveness sweep across public pages, forms, navigation, Member Portal, Foundation Admin and MIS.
+- [x] Fix and revalidate any verified phone-layout overflow, wrapping or navigation issue found during the sweep (no new issue was verified).
+- [x] Audit and improve SEO metadata, crawl directives and production asset delivery for high-impact performance gains.
+- [x] Run production-oriented performance validation and address safe verified frontend delivery optimizations.
+- [x] Verify Contact Us validation flow without creating a fabricated inquiry and confirm the live Google Maps redirect destination.
+- [x] Add refined hover, focus and submission loading interactions to the Contact Us inquiry form with reduced-motion support.
+- [ ] Confirm live publication and safely activate the daily membership-expiry and seven-day reminder schedules, recording their production task UIDs.
+- [ ] Validate the updated Contact Us interaction behaviour and scheduled-task configuration without sending fabricated messages or modifying real member status.
+- [x] Add a responsive floating WhatsApp chat widget using only the verified AASW contact number.
+- [x] Prepare a source-driven homepage testimonial carousel that remains empty until the owner provides real approved testimonials; do not invent reviews, ratings or identities.
+- [x] Validate the responsive widget and no-testimonial carousel state with regression coverage and visual QA.
+- [ ] Inspect existing analytics configuration and safely add Google Analytics 4 instrumentation using a configured Measurement ID.
+- [ ] Track privacy-conscious Contact Us successful submission and WhatsApp widget click conversion events without sending inquiry data to analytics.
+- [x] Generate a comprehensive updated AASW performance and SEO audit report with measured findings, implemented optimizations and publication-ready recommendations.
+- [x] Review implemented website feature status, verify mobile Contact Us/WhatsApp responsiveness and document the next owner-controlled priority.
+- [ ] On owner confirmation of live publication, create both daily membership automation jobs, persist their task UIDs and verify readiness without changing real member status.
+- [x] Add a one-time, idempotent branded follow-up email for annual members who remain unrenewed three days after grace-period expiry.
+- [x] Prepare WhatsApp renewal-reminder activation only for opted-in members, pending owner-provided WhatsApp Business API credentials and approved message template.
+- [x] Deliver a final reviewed inventory of implemented AASW features, live automation status and owner-controlled activation prerequisites.
+- [x] Deliver a detailed priority-based roadmap covering all current AASW capabilities, pending owner inputs and practical future upgrades.
+- [x] Push the complete latest AASW website source, migrations, tests and documentation to the owner-provided GitHub repository and verify the remote commit.
+- [x] Improve the Membership renewal page with clear renewal context, polished loading animation and accessible success/error feedback.
+- [x] Add regression coverage and mobile/desktop QA for the enhanced renewal journey.
+- [x] Add a subtle, reduced-motion-safe confetti celebration to the successful membership renewal screen.
+- [x] Add a responsive renewal troubleshooting FAQ for PAN/email matching, active account and submission issues, with regression coverage and desktop/mobile QA.
+- [x] Audit and refine the public website, key forms and Member Portal visual hierarchy into a more premium cohesive AASW experience.
+- [x] Add regression coverage and desktop/mobile QA for the website-wide visual refinement.
+- [x] Keep all current and future UI refinement work local until the owner explicitly requests a GitHub push.
+- [x] Systematically align shared headers, hero grids, section containers, cards, forms and footer spacing across public pages and Member entry screens.
+- [x] Add regression coverage and desktop/mobile QA for the alignment refinement while keeping the work local-only.
+- [x] Add shared subtle hover and keyboard-focus motion for public buttons and cards, with reduced-motion safeguards.
+- [x] Add a branded non-blocking route-loading transition for Homepage, Contact Us and Member Login navigation.
+- [x] Add regression coverage and desktop/mobile QA for the motion enhancement while keeping the work local-only.
+- [x] Add real-time inline PAN and email validation feedback to the annual membership renewal form.
+- [x] Add a scroll-responsive sticky glassmorphism treatment to the shared public navigation bar.
+- [x] Add regression coverage and desktop/mobile QA for validation and navigation enhancement while keeping the work local-only.
+- [x] Make PAN input auto-format lowercase letters to uppercase while typing, with focused regression coverage and local-only validation.
+- [x] Add a visible valid-PAN checkmark and clear ten-character invalid-PAN guidance to the renewal form.
+- [x] Add privacy-preserving renewal progress auto-save that restores only non-sensitive fields after refresh and never stores PAN or ID-proof data.
+- [x] Add regression coverage and desktop/mobile QA for PAN feedback and safe renewal progress recovery while keeping the work local-only.
+- [x] Add a renewal Clear Form action that resets fields, validation feedback and browser-tab progress data.
+- [x] Add an accessible PAN-format info tooltip beside the renewal PAN label.
+- [x] Add a truthful downloadable PDF renewal receipt after successful renewal, using only confirmed receipt data.
+- [x] Add regression coverage and desktop/mobile QA for renewal reset, format help and receipt download while keeping the work local-only.
+- [x] Enhance renewal submit processing feedback with a prominent accessible loading spinner/state.
+- [x] Add a Membership ID copy action and privacy-aware renewal status share action to the success screen.
+- [x] Add regression coverage and desktop/mobile QA for renewal loading, copy and share actions while keeping the work local-only.
+- [x] Add a final review-and-confirm modal before secure membership renewal submission, without showing PAN or ID-proof data.
+- [x] Add a downloadable and native-shareable AASW renewal celebration badge for social platforms without Membership ID, PAN or identity-document data.
+- [x] Add regression coverage and desktop/mobile QA for renewal confirmation and visual-badge actions while keeping the work local-only.
+- [x] Add refined reduced-motion-safe fade-and-scale confirmation modal opening animation.
+- [x] Make the confirmation modal Edit Details action clearly return to the form while preserving entered data.
+- [x] Add regression coverage and desktop/mobile QA for the modal UX refinement while keeping the work local-only.
+- [x] Add confirm-button processing spinner and pre-success checkmark transition in the renewal review modal.
+- [x] Refine renewal review details into a readable responsive two-column grid.
+- [x] Allow overlay click and Escape dismissal only while confirmation processing is idle, with regression coverage and local-only responsive QA.
+- [x] Complete the user-authorized real annual membership renewal journey end-to-end, verify validation/modal/animation/success actions and document the resulting membership record without GitHub push. The authorized account remained active through 13/08/2027, so the early-renewal safeguard was verified without creating a duplicate cycle or uploading another private ID proof.
+- [x] Show exact early-renewal eligibility date and countdown guidance for active annual members.
+- [x] Add a private next-renewal calendar reminder download/action to the Member Portal.
+- [x] Refine the Member Portal membership summary to clearly show current status, validity and renewal history.
+- [x] Add regression coverage and desktop/mobile QA for membership guidance and calendar reminder while keeping the work local-only.
+- [x] Add an accessible visual membership-term progress indicator that shows elapsed and remaining annual-term time.
+- [x] Add secure Profile Settings controls for member-owned contact information and communication preferences.
+- [x] Add regression coverage and desktop/mobile QA for membership progress and profile settings while keeping the work local-only.
+- [x] Change the membership-term progress bar to an accessible red urgency state when fewer than 30 days remain, with regression coverage and local-only responsive QA.
+- [x] Add a reduced-motion-safe subtle pulse to the under-30-day red membership progress state.
+- [x] Add exact days-and-hours remaining tooltip/focus help to the membership progress bar.
+- [x] Show a prominent Renew Now action beside the progress bar only when fewer than 30 days remain.
+- [x] Add regression coverage and desktop/mobile QA for the urgency motion, timing help and renewal action while keeping the work local-only.
+- [x] Add a source-backed Benefits of renewing link beside Renew Now with an accessible membership-perks modal.
+- [x] Upgrade the urgency progress hover/focus help into a live hours-and-minutes expiry countdown.
+- [x] Add a reduced-motion-safe Renew Now fade-in and early-renewal policy tooltip.
+- [x] Add regression coverage and responsive accessibility QA for the advanced renewal urgency controls while keeping the work local-only.
+- [x] Audit Member Portal, Foundation Admin and MIS server procedures, data models, authentication guards and production environment dependencies.
+- [x] Implement only verified backend and deployment-readiness gaps without modifying real member records or publishing externally.
+- [x] Add focused server-side regression coverage and complete TypeScript, full-test, build and runtime-log validation.
+- [x] Document owner-controlled production prerequisites for external hosting, email delivery, scheduled work and OAuth safely.
+- [x] Run a comprehensive non-destructive verification of public, Member Portal, Foundation Admin, MIS, backend APIs, authentication guards and runtime health.
+- [x] Resolve and revalidate any verified implementation issue found during the comprehensive audit without creating fake records or changing the active member. No new implementation defect was reproduced; the obsolete `/foundation/admin` URL is intentionally not routed, while `/foundation-admin` rendered successfully.
+- [x] Commit and push the latest verified AASW project state to the owner-authorized GitHub repository after successful validation.
+- [x] Verify the pushed remote commit and record the verification outcome. GitHub main was confirmed to match the local tip after the final push.
+- [x] Audit representative public, Member Portal, Foundation Admin and MIS layouts on desktop and mobile for visible alignment, spacing, grid and hierarchy issues.
+- [x] Refine only verified shared and route-specific alignment issues while preserving current source-backed content and secure workflow behaviour.
+- [x] Add or update focused alignment regression coverage and complete responsive visual QA without a GitHub push.
+- [x] Review the complete attached platform-hardening feedback and map each request to existing implemented, pending, owner-controlled or major-scope work.
+- [x] Audit high-risk authentication, member sessions, RBAC, rate limiting, headers, request boundaries, payment/webhook and private-storage controls for genuine gaps.
+- [x] Implement and regression-test only verified high-priority hardening gaps that preserve the current architecture and do not modify real member data.
+- [x] Document deferred major-scope, credential-dependent and production-publication requirements with a clear owner action path, without GitHub push.
+- [x] Verify the latest local validation state, safe disabled integration configuration and GitHub main branch before the owner-authorized final sync.
+- [x] Commit and push the latest verified security, SEO, performance and configuration-safe project updates to the owner-authorized GitHub repository.
+- [x] Confirm GitHub main matches the final local commit and record the synchronization result. GitHub main was confirmed to match the local tip after the authorized push.

@@ -1,0 +1,28 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true });
+const v = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+const net = [];
+v.on("response", r => { if (r.url().includes("api/trpc")) net.push(r.status() + " " + decodeURIComponent(r.url().split("3000")[1] || "").split("?")[0].slice(0, 60)); });
+await v.goto("http://localhost:3000/volunteer", { waitUntil: "networkidle", timeout: 30000 });
+await v.waitForTimeout(1500);
+await v.fill('[name="fullName"]', "E2E Volunteer User");
+await v.fill('[name="email"]', "e2e-volunteer@aaswfoundation.test");
+await v.fill('[name="phone"]', "9876543210");
+await v.selectOption('[name="state"]', "Uttar Pradesh");
+await v.fill('[name="city"]', "Lucknow");
+await v.fill('[name="availability"]', "Weekends");
+await v.fill('[name="skills"]', "Teaching, community outreach");
+await v.fill('[name="interests"]', "Digital literacy for women");
+await v.check("form input[type=checkbox]");
+await v.click("form button[type=submit]");
+await v.waitForTimeout(5000);
+const res = await v.evaluate(() => {
+  const formGone = !document.querySelector("form.membership-application-form");
+  const success = document.querySelector("[class*=success]");
+  const body = document.body.innerText;
+  const ref = body.match(/[A-Z]{3,}-[A-Z]{2,}-\d{3,}/)?.[0] ?? null;
+  return { formGone, ref, successText: success ? success.textContent.trim().slice(0, 160) : null };
+});
+console.log("VOLUNTEER FULL:", JSON.stringify(res, null, 1));
+console.log("TRPC CALLS:", JSON.stringify(net));
+await browser.close();

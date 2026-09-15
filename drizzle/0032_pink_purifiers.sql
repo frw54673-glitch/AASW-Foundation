@@ -1,0 +1,1 @@
+ALTER TABLE `foundation_admin_alerts` MODIFY COLUMN `alertType` enum('member_auto_approved','completion_submitted') NOT NULL;

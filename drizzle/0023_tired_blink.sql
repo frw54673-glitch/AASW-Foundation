@@ -1,0 +1,1 @@
+ALTER TABLE `member_expiry_reminders` MODIFY COLUMN `reminderType` enum('seven_day','post_grace') NOT NULL DEFAULT 'seven_day';

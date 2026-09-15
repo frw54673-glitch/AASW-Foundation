@@ -1,0 +1,172 @@
+/* ==========================================================================
+   READABILITY PASS (background vs text fixes, 13 Sep 2026)
+   Every rule here repairs text that became hard or impossible to read against
+   its background. Brand palette only: ink #261d1d, deep marigold #a06a12,
+   dark ink section #342235; greens stay on light surfaces only.
+   ========================================================================== */
+
+/* 1. Kickers/eyebrows inside the dark ink section: brand green was invisible
+      on #342235 (2.26:1). Marigold matches the section's other accent text. */
+.inner-section-ink .section-kicker,
+.inner-section-ink .eyebrow { color: #d09b3b; }
+
+/* 2. Hero photo credit chip sits on a dark plum photo box (#342235): warm
+      brown text on thin cream could sink into the dark cover. Ink text on a
+      slightly more opaque cream chip stays readable over any hero imagery.
+      Also covers the homepage hero's "AASW field photo" tag and field-note
+      photo chips. */
+.inner-hero-image .image-source-label,
+.field-note-image .image-source-label,
+.story-image .image-source-label,
+.illustrative-tag { color: #261d1d; background: rgba(255, 250, 240, .95); }
+.hero-visual .illustrative-tag { opacity: .95; }
+
+/* 3. Gold chapter numbers on sand/paper surfaces were below readable contrast
+      (1.99-2.39:1). Deep marigold holds the tone but passes 3:1. */
+.update-number { color: #a06a12; }
+.update-row:hover .update-number,
+.update-row:focus-within .update-number { color: #2f6b52; }
+.report-row-index { color: #9c6710; }
+.governance-card span { color: #a06a12; }
+.impact-lens > span { color: #a06a12; }
+.impact-lens:hover > span,
+.impact-lens:focus-within > span { color: #9c6710; }
+
+/* 3b. Program detail cards (who-we-are/what-we-do/programs/digital-skills/
+      green-entrepreneurship/mentorship-community): chapter number + the
+      "Field note" label sit on the sand section — same deep marigold. */
+.program-detail-top > span { color: #9c6710; }
+.program-detail-detail > span { color: #9c6710; }
+
+/* 3b-2. Chapter cards (who-we-are/volunteer), policy sections (privacy/refund)
+      and the about work list also carry bare gold <span> numbers on light
+      sections. Scope to their grids so unrelated bare spans stay untouched. */
+.chapter-card-grid article > span:first-child,
+.policy-sections article > span:first-child,
+.about-programme-list article > span:first-child { color: #a06a12; }
+
+/* 3c. About-page governance grid + advisory function list numbers. */
+.about-governance-grid span,
+.live-policy-grid.advisory-functions-list span { color: #a06a12; }
+
+/* 3d. Hero symbol panel (contact/media-centre/field-gallery/privacy/refund):
+      the "from AASW" strong uses light gold #edc36e on the green gradient —
+      1.33:1. Bright gold reads clearly on both gradient stops. */
+.inner-hero-symbol span strong { color: #f7d789; }
+
+/* 3d. Quote mark + story-card hover kicker share the sand/paper surfaces. */
+.field-note-kicker,
+.field-note-copy .section-kicker { color: #9c6710; }
+.inner-quote-mark { color: #a06a12; }
+.story-card:hover .section-kicker,
+.story-card:focus-within .section-kicker { color: #9c6710; }
+
+/* 3e. Homepage section rails: the gold chapter numbers ("01"-"05") ride the
+      paper and sand bands — same deep-marigold treatment. */
+.section-rail > span:first-child { color: #a06a12; }
+
+/* 3f. Homepage live panels — goal grid, method list and the field-notes
+      mini-list numbers all sit on the sand/paper bands too. */
+.live-goal-grid article > span:first-child,
+.live-method-layout ol li span:first-child,
+.mini-list span:first-child { color: #a06a12; }
+
+/* 3g. Story-card index numbers: gold #d09b3b on the ochre card is invisible
+      (gold on ochre = 1:1) and thin on cream cards (2.39:1). Ink on the ochre
+      card, deep marigold on light cards. */
+.story-card-ochre .story-card-index { color: #261d1d; }
+.story-card:not(.story-card-ochre) .story-card-index { color: #a06a12; }
+
+/* 3h. Homepage programme rows: the ochre row's gold meta number was 2.79:1. */
+.program-row-ochre .program-meta span { color: #9c6710; }
+
+/* 3i. About-page leadership cards: the Patron kicker sits on an ochre card
+      (#d09b3b) — brand green on ochre is 2.52:1. Ink keeps the hierarchy. */
+.about-patron-card .section-kicker { color: #261d1d; }
+
+/* 4. Required-field asterisks on cream forms (membership/donation/volunteer):
+      bright orange #d4820a sat at 2.88:1. Deep amber reads clearly. */
+.membership-application-required span,
+.membership-application-form b,
+.donation-details-form b,
+.volunteer-form-required b { color: #b0130b; }
+
+/* 5. Donate page: active amount chip kept white text on amber (2.95:1) and
+      the tax-benefit fine print grey was muddy (2.94:1). Ink text on the
+      active chip; the standard muted grey for fine print. */
+.donation-amount-choice-active { background: #d4820a; color: #261d1d; }
+.donation-amount-choice-active i { border-color: #261d1d; }
+.tax-benefit-result small { color: #796966; }
+
+/* 6. Contact helpdesk form lives on the ink band: its intro eyebrow inherits
+      the green kicker colour (invisible on #342235) and the gold asterisks
+      sat at 1.66:1. Marigold eyebrow; bright-gold asterisks (matches the
+      data-note lock copy treatment on the same band). */
+.get-in-touch-helpdesk .eyebrow,
+.contact-inquiry-intro .eyebrow { color: #d09b3b; }
+.contact-inquiry-form label > span b,
+.inquiry-data-note b { color: #f0b445; }
+
+/* ==========================================================================
+   MEMBER PORTAL (dashboard/projects sidebar + service panels)
+   ========================================================================== */
+
+/* 7. Gray #999 meta text (membership number, dates, buttons' small labels,
+      timeline stamps) on white/cream cards sat at 2.52-2.85:1. The portal's
+      own muted brown #6b6355 passes 4.5:1 and matches the existing copy. */
+.member-sidebar-identity code,
+.member-service > span,
+.member-completion-timeline span,
+.member-completion-time span,
+.member-payout-details span,
+.member-info-grid small,
+.member-service-request-panel label em { color: #6b6355; }
+
+/* 7b. The draft hint's pale sage #8aa08d was 2.52:1 on the cream panel. */
+.member-draft-hint { color: #5a7161 !important; }
+
+/* ==========================================================================
+   DARK-BAND HEADLINES (plain solid text — gradient/shimmer treatments removed)
+   ========================================================================== */
+
+/* 8. The gradient-text treatments (sheen waves) read as light bands moving
+      across the words on the homepage hero/donate band. All headline and
+      accent text now renders as plain solid colours with safe contrast:
+      cream/gold on the dark bands, deep green/marigold on light bands. */
+.donate-copy h2,
+.pathway-heading h2,
+.inner-section-ink h2 {
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  color: #fffaf0;
+}
+.donate-copy h2 em,
+.pathway-heading h2 em {
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  color: #f7d789;
+}
+.donate-copy .eyebrow { color: #edc36e; }
+.donate-copy .eyebrow .eyebrow-dot { background: #fffaf0; }
+
+/* 9. Light-band accent <em> words (hero, section headings, about heading):
+      solid deep green keeps the accent without any band effect. */
+.section-heading-row h2 em,
+.hero-copy h1 em,
+.about-heading h2 em,
+.inner-join-section h2 {
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  color: #2f6b52;
+}
+.inner-join-section h2 { color: #261d1d; }
+.inner-join-section h2 em { color: #6b4508; }
+
+@media (prefers-reduced-motion: reduce) {
+  .section-heading-row h2 em,
+  .hero-copy h1 em,
+  .about-heading h2 em {
+    background: none !important;
+    -webkit-text-fill-color: currentColor !important;
+  }
+}

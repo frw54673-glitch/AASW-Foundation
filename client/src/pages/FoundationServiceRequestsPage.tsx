@@ -1,0 +1,141 @@
+import { FormEvent, useState } from "react";
+import { BadgeCheck, Banknote, CheckCircle2, ClipboardList, Download, Eye, ExternalLink, FileText, LifeBuoy, LockKeyhole, RefreshCw, Send, ShieldAlert, Users, XCircle } from "lucide-react";
+import DashboardLayout from "@/components/DashboardLayout";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
+import { trpc } from "@/lib/trpc";
+import { notifyError, notifySuccess } from "@/lib/notifications";
+import "./foundation-admin.css";
+
+const menu = [
+  { icon: ClipboardList, label: "Foundation workspace", path: "/foundation-admin" },
+  { icon: Users, label: "Member accounts", path: "/foundation-admin/members" },
+  { icon: CheckCircle2, label: "Programme requests", path: "/foundation-admin/service-requests" },
+  { icon: LifeBuoy, label: "Support inbox", path: "/foundation-admin/support-inbox" },
+];
+
+const statuses = ["submitted", "reviewing", "accepted", "not_available", "completed", "closed"] as const;
+const serviceLabels: Record<string, string> = {
+  digital_skill_development: "Digital skill development",
+  green_entrepreneurship: "Green entrepreneurship",
+  mentorship_business_support: "Mentorship & business support",
+  workshops_seminars: "Workshops & seminars",
+  building_community: "Building the community",
+};
+
+const dateTime = (value: Date | string) => new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+const words = (value: string) => value.replaceAll("_", " ");
+const rupees = (paise: number | null | undefined) => `₹${((paise ?? 0) / 100).toLocaleString("en-IN")}`;
+
+type CompletionProof = { storageKey: string; originalName: string; mimeType: string; fileSize: number };
+type CompletionRecord = { completionRef: string; requestRef: string; serviceType: string; details: string; driveLink: string | null; status: "submitted" | "verified" | "rejected" | "paid"; rejectionReason: string | null; payoutUpiId: string | null; payoutAccountName: string | null; payoutAccountNumber: string | null; payoutIfsc: string | null; payoutAmount: number | null; payoutMethod: "upi" | "bank_transfer" | "other" | null; payoutReference: string | null; payoutNote: string | null; verifiedAt: Date | string | null; paidAt: Date | string | null; createdAt: Date | string; updatedAt: Date | string; fullName: string; membershipNo: string; email: string; proofs: CompletionProof[] };
+
+export function FoundationServiceRequestsPage() {
+  const { user, loading } = useAuth();
+  if (loading) return <main className="min-h-screen bg-[#fffdf7]" />;
+  if (!user) return <main className="grid min-h-screen place-items-center bg-[#fffdf7] p-6 text-center text-[#291d1d]"><section className="max-w-md border border-[#291d1d]/15 bg-white p-8"><LockKeyhole className="mx-auto text-[#2f6b52]" size={28} /><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[#2f6b52]">Foundation management</p><h1 className="mt-2 font-serif text-4xl">Service requests, with care.</h1><p className="mt-4 text-sm leading-6 text-[#5b4c47]">Sign in with an authorised Foundation account to review member programme requests.</p><button type="button" onClick={() => startLogin()} className="mt-6 bg-[#2f6b52] px-4 py-3 text-xs font-bold uppercase tracking-wider text-white">Sign in to continue</button></section></main>;
+  if (user.role !== "admin") return <DashboardLayout menuItems={menu} title="AASW Foundation"><section className="mx-auto mt-14 max-w-2xl border border-red-200 bg-red-50 p-8 text-red-950"><ShieldAlert size={28} /><p className="mt-4 text-xs font-bold uppercase tracking-[.14em]">Restricted workspace</p><h1 className="mt-2 font-serif text-4xl">Foundation management is admin-only.</h1></section></DashboardLayout>;
+  return <DashboardLayout menuItems={menu} title="AASW Foundation"><ServiceRequestWorkspace /></DashboardLayout>;
+}
+
+function ServiceRequestWorkspace() {
+  const utils = trpc.useUtils();
+  const requests = trpc.management.serviceRequests.list.useQuery({ limit: 100 });
+  const [completionFilter, setCompletionFilter] = useState<"submitted" | "verified" | "rejected" | "paid" | "all">("all");
+  const completions = trpc.management.completions.list.useQuery({ limit: 50 }, { enabled: completionFilter === "all" });
+  const filteredCompletions = trpc.management.completions.list.useQuery({ limit: 50, status: completionFilter === "all" ? undefined : completionFilter }, { enabled: completionFilter !== "all" });
+  const update = trpc.management.serviceRequests.updateStatus.useMutation({
+    onSuccess: (_, input) => { notifySuccess("Service request updated", `Status changed to ${words(input.status)}.`); void utils.management.serviceRequests.list.invalidate(); },
+    onError: error => notifyError("Service request could not be updated", error.message),
+  });
+  const completionList = completionFilter === "all" ? completions.data : filteredCompletions.data;
+  const completionLoading = completionFilter === "all" ? completions.isLoading : filteredCompletions.isLoading;
+
+  const invalidateCompletions = () => { void utils.management.completions.list.invalidate(); };
+
+  if (requests.isLoading) return <main className="foundation-admin-workspace mx-auto max-w-5xl space-y-6 bg-[#fffdf7] text-[#291d1d]" aria-busy="true"><div className="foundation-admin-skeleton-hero animate-pulse" aria-hidden /><div className="grid gap-3 lg:grid-cols-2">{Array.from({ length: 2 }, (_, i) => <div key={i} className="foundation-admin-skeleton-record animate-pulse" aria-hidden />)}</div><p className="sr-only">Loading member service requests.</p></main>;
+  if (requests.error) return <main className="mx-auto max-w-5xl p-6 text-[#291d1d]"><p className="border border-red-200 bg-red-50 p-4 text-sm text-red-800">{requests.error.message}</p></main>;
+
+  return <main className="foundation-admin-workspace mx-auto max-w-6xl space-y-6 bg-[#fffdf7] text-[#291d1d]"><header className="foundation-admin-hero flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-[#2f6b52]">Protected member workflow</p><h1 className="mt-2 font-serif text-5xl tracking-tight">Programme requests.</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-[#5b4c47]">Review requests sent from <strong>Join a service</strong> for published AASW programme areas. Add a private Foundation update with the accepted member’s next step; it will appear only in that member’s service history. General messages submitted from the member <strong>Support chat</strong> appear in the <a className="font-bold text-[#2f6b52] underline underline-offset-4" href="/foundation-admin/support-inbox">Support inbox</a>, not on this screen.</p></div><button type="button" onClick={() => { void requests.refetch(); invalidateCompletions(); }} className="inline-flex items-center gap-2 self-start border border-[#2f6b52] px-3 py-2 text-xs font-bold uppercase tracking-wider text-[#2f6b52] hover:bg-[#2f6b52] hover:text-white"><RefreshCw size={14} />Refresh</button></header>
+  <CompletionVerificationSection completions={completionList ?? []} loading={completionLoading} filter={completionFilter} onFilter={setCompletionFilter} onInvalidate={invalidateCompletions} />
+  <section className="grid gap-4 lg:grid-cols-2">{requests.data?.length ? requests.data.map(request => <ProgrammeRequestCard key={request.requestRef} request={request} pending={update.isPending} onSave={input => update.mutate(input)} />) : <p className="border border-dashed border-[#291d1d]/20 p-5 text-sm text-[#796966]">No programme service requests have been submitted yet. General member messages are available in the Support inbox.</p>}</section></main>;
+}
+
+function CompletionVerificationSection({ completions, loading, filter, onFilter, onInvalidate }: { completions: CompletionRecord[]; loading: boolean; filter: "submitted" | "verified" | "rejected" | "paid" | "all"; onFilter: (value: "submitted" | "verified" | "rejected" | "paid" | "all") => void; onInvalidate: () => void }) {
+  const utils = trpc.useUtils();
+  // Live per-status counts keep the numbered chips honest after every action.
+  const stats = trpc.management.completions.stats.useQuery();
+  // The activity feed mirrors every recent verify/pay move for accountability.
+  const activity = trpc.management.completions.activity.useQuery({ limit: 8 });
+  // Compliance export: server builds the CSV (destinations excluded) and the
+  // download itself is audit-logged.
+  const exportCsv = trpc.management.completions.exportCsv.useMutation({
+    onSuccess: result => {
+      const url = URL.createObjectURL(new Blob([`\uFEFF${result.content}`], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      notifySuccess("Completion CSV downloaded", `${result.filename} is ready. Payout destinations are never included in exports.`);
+    },
+    onError: error => notifyError("Export failed", error.message),
+  });
+  const refreshAll = () => { void utils.management.completions.list.invalidate(); void utils.management.completions.stats.invalidate(); void utils.management.completions.activity.invalidate(); void utils.management.serviceRequests.list.invalidate(); };
+  const verify = trpc.management.completions.verify.useMutation({ onSuccess: () => { notifySuccess("Completion verified", "Payment details are now visible to the member. Settle the payout when the transfer completes."); refreshAll(); }, onError: error => notifyError("Verification failed", error.message) });
+  const reject = trpc.management.completions.reject.useMutation({ onSuccess: () => { notifySuccess("Completion rejected", "The member can resubmit an updated report."); refreshAll(); }, onError: error => notifyError("Rejection failed", error.message) });
+  const markPaid = trpc.management.completions.markPaid.useMutation({ onSuccess: () => { notifySuccess("Payout recorded", "The service request is marked completed and the member can download the payout receipt."); refreshAll(); }, onError: error => notifyError("Payout failed", error.message) });
+  const proofUrl = trpc.management.completions.proofUrl.useMutation({ onError: error => notifyError("Proof could not be opened", error.message) });
+  const openProof = (storageKey: string) => proofUrl.mutate({ storageKey }, { onSuccess: result => window.open(result.url, "_blank", "noopener") });
+
+  const counts = stats.data;
+  const countFor = (item: "submitted" | "verified" | "rejected" | "paid" | "all") => item === "all" ? (counts ? counts.submitted + counts.verified + counts.rejected + counts.paid : undefined) : counts?.[item];
+
+  return <section aria-labelledby="completion-verification-heading" className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-[#9c4a3c]">Completion verification</p><h2 id="completion-verification-heading" className="mt-1 font-serif text-3xl">Reports, proofs & payouts.</h2></div><div className="flex flex-wrap gap-2" role="group" aria-label="Filter completion reports by status">{(["submitted", "verified", "rejected", "paid", "all"] as const).map(item => { const total = countFor(item); return <button key={item} type="button" onClick={() => onFilter(item)} className={`border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider ${filter === item ? "border-[#9c4a3c] bg-[#9c4a3c] text-white" : "border-[#291d1d]/20 bg-white text-[#625951] hover:border-[#9c4a3c]"}`}>{item === "all" ? "All reports" : words(item)}{total !== undefined && <span className={`ml-2 inline-block min-w-[1.4rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold tabular-nums ${filter === item ? "bg-white/20 text-white" : "bg-[#291d1d]/8 text-[#9c4a3c]"}`}>{total}</span>}</button>; })}<button type="button" disabled={exportCsv.isPending} onClick={() => exportCsv.mutate({ status: filter === "all" ? undefined : filter })} className="ml-auto inline-flex items-center gap-1.5 border border-[#2f6b52] px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#2f6b52] hover:bg-[#2f6b52] hover:text-white disabled:opacity-60" title="Download a CSV of completion reports and payout outcomes"><Download size={13} />{exportCsv.isPending ? "Preparing…" : "Export CSV"}</button></div></div>
+      {loading ? <div className="foundation-admin-skeleton-record animate-pulse" aria-hidden /> : completions.length ? <div className="grid gap-4 xl:grid-cols-2">{completions.map(completion => <CompletionCard key={completion.completionRef} completion={completion} pending={verify.isPending || reject.isPending || markPaid.isPending} onVerify={(amount, method, note) => verify.mutate({ completionRef: completion.completionRef, payoutAmount: amount, payoutMethod: method, payoutNote: note.trim() || undefined })} onReject={reason => reject.mutate({ completionRef: completion.completionRef, rejectionReason: reason })} onMarkPaid={reference => markPaid.mutate({ completionRef: completion.completionRef, payoutReference: reference })} onOpenProof={openProof} />)}</div> : <p className="border border-dashed border-[#291d1d]/20 p-5 text-sm text-[#796966]">No completion reports{filter === "all" ? "" : ` marked ${words(filter)}`} yet. Members submit them from the portal after you accept a programme request.</p>}
+      <p className="flex flex-wrap items-center gap-x-5 gap-y-1 border border-[#291d1d]/10 bg-[#fffaf0] px-4 py-2.5 text-[12px] text-[#625951]">
+        <span>Settlement queue: <strong className="text-[#9c4a3c] tabular-nums">{counts ? rupees(counts.verifiedPayoutPaise) : "…"}</strong> across <strong className="tabular-nums">{counts?.verified ?? "…"}</strong> verified report{(counts?.verified ?? 0) === 1 ? "" : "s"}</span>
+        <span>Settled to date: <strong className="text-[#2f6b52] tabular-nums">{counts ? rupees(counts.paidPayoutPaise) : "…"}</strong> across <strong className="tabular-nums">{counts?.paid ?? "…"}</strong> payout{(counts?.paid ?? 0) === 1 ? "" : "s"}</span>
+        {counts?.settledByProgramme?.length ? <span className="text-[#8a8178]">By programme: {counts.settledByProgramme.map(entry => `${serviceLabels[entry.serviceType] ?? words(entry.serviceType)} ${rupees(entry.settledPaise)} (${entry.payouts})`).join(" · ")}</span> : null}
+      </p>
+      {activity.data?.length ? <section aria-labelledby="completion-activity-heading" className="border border-[#291d1d]/10 bg-white p-5">
+        <div className="flex items-baseline justify-between gap-3"><h3 id="completion-activity-heading" className="font-serif text-xl">Recent payout activity.</h3><button type="button" onClick={() => void activity.refetch()} className="text-[11px] font-bold uppercase tracking-wider text-[#9c4a3c]">Refresh</button></div>
+        <ul className="mt-4 grid gap-2.5">{activity.data.map(entry => <li key={entry.completionRef} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-l-2 border-[#9c4a3c]/40 pl-3 text-[13px]">
+          <span><strong>{entry.fullName}</strong> <span className="text-[#796966]">({entry.membershipNo})</span> — {serviceLabels[entry.serviceType] ?? words(entry.serviceType)}</span>
+          <span className="flex items-center gap-3 text-[12px] text-[#796966]">{entry.payoutAmount != null && <strong className="text-[#291d1d] tabular-nums">{rupees(entry.payoutAmount)}</strong>}{entry.paidAt ? <span className="text-[#2f6b52]">Settled {dateTime(entry.paidAt)}{entry.payoutReference ? ` · ${entry.payoutReference}` : ""}</span> : entry.verifiedAt ? <span className="text-[#9c4a3c]">Verified {dateTime(entry.verifiedAt)}</span> : <span className="text-amber-700">Report received {dateTime(entry.createdAt)}</span>}</span>
+        </li>)}</ul>
+      </section> : null}</section>;
+}
+
+function CompletionCard({ completion, pending, onVerify, onReject, onMarkPaid, onOpenProof }: { completion: CompletionRecord; pending: boolean; onVerify: (amountPaise: number, method: "upi" | "bank_transfer" | "other", note: string) => void; onReject: (reason: string) => void; onMarkPaid: (reference: string) => void; onOpenProof: (storageKey: string) => void }) {
+  const [amount, setAmount] = useState("");
+  // Pre-select the channel the member actually shared so verify is one click
+  // closer and a UPI/bank mismatch is visible before the payout is approved.
+  const [method, setMethod] = useState<"upi" | "bank_transfer" | "other">(completion.payoutUpiId ? "upi" : completion.payoutAccountNumber ? "bank_transfer" : "upi");
+  const [note, setNote] = useState("");
+  const [reason, setReason] = useState("");
+  const [reference, setReference] = useState("");
+  const [reviewing, setReviewing] = useState<"verify" | "reject" | null>(null);
+  const submitVerify = (event: FormEvent) => { event.preventDefault(); const rupeesValue = Number(amount.replace(/[^0-9]/g, "")); if (!rupeesValue || rupeesValue < 100) return notifyError("Enter the payout amount", "The minimum verified payout is ₹100."); onVerify(rupeesValue * 100, method, note); };
+  const submitReject = (event: FormEvent) => { event.preventDefault(); if (reason.trim().length < 10) return notifyError("Reason too short", "Tell the member why the report was rejected (at least 10 characters)."); onReject(reason.trim()); };
+  const submitPaid = (event: FormEvent) => { event.preventDefault(); if (reference.trim().length < 4) return notifyError("Reference missing", "Enter the UPI or bank transfer reference number."); onMarkPaid(reference.trim()); };
+  return <article className="border border-[#291d1d]/15 bg-[#fffaf0] p-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-[#9c4a3c]">{serviceLabels[completion.serviceType] ?? words(completion.serviceType)}</p><h3 className="mt-2 font-serif text-2xl">{completion.fullName}</h3><p className="mt-1 text-xs text-[#796966]">{completion.membershipNo} · {completion.email}</p></div><span className={`w-fit border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${completion.status === "submitted" ? "border-amber-300 bg-amber-50 text-amber-800" : completion.status === "verified" ? "border-emerald-300 bg-emerald-50 text-emerald-800" : completion.status === "rejected" ? "border-red-300 bg-red-50 text-red-800" : "border-[#2f6b52] bg-[#2f6b52]/10 text-[#2f6b52]"}`}>{words(completion.status)}</span></div>
+    <p className="mt-4 whitespace-pre-wrap border-l-2 border-[#9c4a3c] pl-3 text-sm leading-6 text-[#4e4540]">{completion.details}</p>
+    <div className="mt-3 grid gap-2">{completion.proofs.length ? completion.proofs.map(proof => <button key={proof.storageKey} type="button" onClick={() => onOpenProof(proof.storageKey)} className="flex w-fit items-center gap-2 border border-[#291d1d]/20 bg-white px-3 py-2 text-xs font-semibold text-[#4e4540] hover:border-[#9c4a3c] hover:text-[#9c4a3c]"><Eye size={14} /><FileText size={14} />{proof.originalName}<small className="font-normal text-[#796966]">· {(proof.fileSize / 1024).toFixed(0)} KB</small></button>) : <p className="text-xs text-[#796966]">No proof files attached.</p>}{completion.driveLink && <a href={completion.driveLink} target="_blank" rel="noreferrer" className="flex w-fit items-center gap-2 border border-[#291d1d]/20 bg-white px-3 py-2 text-xs font-semibold text-[#2f6b52] hover:border-[#2f6b52]"><ExternalLink size={14} />Member’s Google Drive proof</a>}</div>
+    <div className="mt-3 border border-[#291d1d]/15 bg-white p-3"><p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9c4a3c]"><Banknote size={13} />Payout destination shared by the member</p>{completion.payoutUpiId ? <p className="mt-2 text-sm font-semibold text-[#291d1d]">UPI · {completion.payoutUpiId}</p> : completion.payoutAccountNumber ? <div className="mt-2 grid gap-1 text-sm text-[#291d1d]"><p><strong>{completion.payoutAccountName}</strong></p><p>Account no. {completion.payoutAccountNumber} · IFSC {completion.payoutIfsc}</p></div> : <p className="mt-2 text-xs text-[#796966]">The member did not share a payout destination with this report.</p>}</div>
+    <p className="mt-4 text-[10px] font-bold uppercase tracking-wider text-[#796966]">{completion.completionRef} · report {dateTime(completion.updatedAt)}</p>
+    {completion.status === "submitted" && <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => setReviewing(reviewing === "verify" ? null : "verify")} className="inline-flex items-center gap-2 bg-[#2f6b52] px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white"><BadgeCheck size={14} />Verify & set payout</button><button type="button" onClick={() => setReviewing(reviewing === "reject" ? null : "reject")} className="inline-flex items-center gap-2 border border-red-300 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-red-800 hover:bg-red-50"><XCircle size={14} />Reject report</button></div>}
+    {completion.status === "submitted" && reviewing === "verify" && <form onSubmit={submitVerify} className="mt-3 grid gap-2 border border-emerald-200 bg-emerald-50/50 p-3"><label className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-[#625951]">Payout amount (₹)<input value={amount} onChange={event => setAmount(event.target.value)} inputMode="numeric" placeholder="2500" className="border border-[#291d1d]/20 bg-white p-2 text-sm font-normal normal-case tracking-normal" /></label><label className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-[#625951]">Payment method<select value={method} onChange={event => setMethod(event.target.value as "upi" | "bank_transfer" | "other")} className="border border-[#291d1d]/20 bg-white p-2 text-sm font-normal normal-case tracking-normal"><option value="upi">UPI transfer</option><option value="bank_transfer">Bank transfer</option><option value="other">Other (note below)</option></select></label><label className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-[#625951]">Note for the member<textarea value={note} onChange={event => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="Example: Payout will reach your UPI ID registered with the Foundation within 3 working days." className="border border-[#291d1d]/20 bg-white p-2 text-sm font-normal normal-case tracking-normal" /></label><button disabled={pending} className="inline-flex w-fit items-center gap-2 bg-[#2f6b52] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white disabled:opacity-60"><BadgeCheck size={14} />{pending ? "Verifying" : "Confirm verification"}</button></form>}
+    {completion.status === "submitted" && reviewing === "reject" && <form onSubmit={submitReject} className="mt-3 grid gap-2 border border-red-200 bg-red-50/50 p-3"><label className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-[#625951]">Reason shown to the member<textarea value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} rows={2} placeholder="Example: The workshop photos do not show the delivered session. Please attach proof of the training." className="border border-[#291d1d]/20 bg-white p-2 text-sm font-normal normal-case tracking-normal" /></label><button disabled={pending} className="inline-flex w-fit items-center gap-2 border border-red-400 bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-red-800 disabled:opacity-60"><XCircle size={14} />{pending ? "Rejecting" : "Confirm rejection"}</button></form>}
+    {completion.status === "verified" && <form onSubmit={submitPaid} className="mt-3 grid gap-2 border border-[#2f6b52]/30 bg-[#2f6b52]/5 p-3"><p className="text-[11px] font-bold uppercase tracking-wider text-[#2f6b52]">Payout approved {rupees(completion.payoutAmount)} · {words(completion.payoutMethod ?? "other")}{completion.payoutNote ? ` — ${completion.payoutNote}` : ""}</p>{(completion.payoutUpiId || completion.payoutAccountNumber) && <p className="border-l-2 border-[#9c4a3c] pl-2 text-[11px] font-semibold leading-5 text-[#4e4540]">Send via {completion.payoutUpiId ? `UPI to ${completion.payoutUpiId}` : `bank transfer to ${completion.payoutAccountName} · A/C ${completion.payoutAccountNumber} · IFSC ${completion.payoutIfsc}`} — verify the destination in your payment app before marking paid.</p>}<label className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-[#625951]">Transfer reference number<input value={reference} onChange={event => setReference(event.target.value)} maxLength={120} placeholder="UPI/UTR reference from your payment app" className="border border-[#291d1d]/20 bg-white p-2 text-sm font-normal normal-case tracking-normal" /></label><button disabled={pending} className="inline-flex w-fit items-center gap-2 bg-[#9c4a3c] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white disabled:opacity-60"><Banknote size={14} />{pending ? "Recording" : "Mark paid & complete"}</button></form>}
+    {completion.status === "rejected" && <p className="mt-3 border-l-2 border-red-400 pl-3 text-xs leading-5 text-red-900">Rejected — {completion.rejectionReason} The member can resubmit an updated report.</p>}
+    {completion.status === "paid" && <p className="mt-3 border-l-2 border-[#2f6b52] pl-3 text-xs leading-5 text-[#2f6b52]">Settled {rupees(completion.payoutAmount)} via {words(completion.payoutMethod ?? "other")} · reference {completion.payoutReference} · {dateTime(completion.paidAt ?? completion.updatedAt)}. The service request is marked completed.</p>}
+  </article>;
+}
+
+function ProgrammeRequestCard({ request, pending, onSave }: { request: { requestRef: string; serviceType: string; fullName: string; membershipNo: string; email: string; message: string | null; status: (typeof statuses)[number]; adminNote: string | null; createdAt: Date | string }; pending: boolean; onSave: (input: { requestRef: string; status: (typeof statuses)[number]; adminNote?: string }) => void }) {
+  const [status, setStatus] = useState<(typeof statuses)[number]>(request.status);
+  const [note, setNote] = useState(request.adminNote ?? "");
+  const submit = (event: FormEvent) => { event.preventDefault(); onSave({ requestRef: request.requestRef, status, adminNote: note.trim() || undefined }); };
+  return <article className="border border-[#291d1d]/15 bg-[#fffaf0] p-5"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-[#2f6b52]">{serviceLabels[request.serviceType] ?? words(request.serviceType)}</p><h2 className="mt-2 font-serif text-3xl">{request.fullName}</h2><p className="mt-1 text-xs text-[#796966]">{request.membershipNo} · {request.email}</p></div><select value={status} disabled={pending} onChange={event => setStatus(event.target.value as (typeof statuses)[number])} className="border border-[#291d1d]/20 bg-white px-2 py-2 text-xs capitalize disabled:opacity-60">{statuses.map(item => <option key={item} value={item}>{words(item)}</option>)}</select></div>{request.message ? <p className="mt-4 whitespace-pre-wrap border-l-2 border-[#2f6b52] pl-3 text-sm leading-6 text-[#4e4540]">{request.message}</p> : <p className="mt-4 text-sm text-[#796966]">No additional support note was provided.</p>}<form onSubmit={submit} className="mt-4 grid gap-2"><label className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-[#625951]">Foundation update for this member<textarea value={note} onChange={event => setNote(event.target.value)} maxLength={1200} rows={4} placeholder="Example: Your workshop place is confirmed. The Foundation team will contact you with the date and location." className="border border-[#291d1d]/20 bg-white p-3 text-sm font-normal normal-case tracking-normal" /></label><button disabled={pending} className="inline-flex w-fit items-center gap-2 bg-[#2f6b52] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white disabled:opacity-60"><Send size={14} />{pending ? "Saving" : "Save status & update"}</button></form><p className="mt-4 text-[10px] font-bold uppercase tracking-wider text-[#796966]">{request.requestRef} · submitted {dateTime(request.createdAt)}</p></article>;
+}
