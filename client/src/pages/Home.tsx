@@ -103,6 +103,7 @@ export default function Home() {
   const [selectedSupport, setSelectedSupport] = useState("₹1,100");
   const [showTop, setShowTop] = useState(false);
   const [headerScrolled, setHeaderScrolled] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
 
   useEffect(() => {
     const onScroll = () => {
@@ -114,11 +115,38 @@ export default function Home() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Reading progress: a thin brand-gradient rail pinned to the very top of
+  // the viewport. rAF-throttled like the other scroll work.
+  useEffect(() => {
+    let frame = 0;
+    const compute = () => {
+      frame = 0;
+      const doc = document.documentElement;
+      const max = doc.scrollHeight - window.innerHeight;
+      setScrollProgress(max > 0 ? Math.min(window.scrollY / max, 1) : 0);
+    };
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(compute);
+    };
+    compute();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
   // Hero parallax: the visual column settles slower than the copy while the
   // first screen scrolls past, giving the hero real depth. rAF-throttled and
   // fully skipped for reduced-motion visitors.
   const heroVisualRef = useRef<HTMLDivElement | null>(null);
   const heroCopyRef = useRef<HTMLDivElement | null>(null);
+  // Hero image tilt: the field photo leans a few degrees toward the pointer.
+  // Custom properties only, so the parallax translateY on the wrap above
+  // never fights this transform.
+  const heroTiltRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     let frame = 0;
@@ -136,10 +164,78 @@ export default function Home() {
       if (!frame) frame = window.requestAnimationFrame(applyParallax);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
+    let tiltFrame = 0;
+    const onTilt = (event: PointerEvent) => {
+      const target = heroTiltRef.current;
+      if (!target || tiltFrame) return;
+      const { clientX, clientY } = event;
+      tiltFrame = window.requestAnimationFrame(() => {
+        tiltFrame = 0;
+        const rect = target.getBoundingClientRect();
+        const px = (clientX - rect.left) / rect.width - 0.5;
+        const py = (clientY - rect.top) / rect.height - 0.5;
+        target.style.setProperty("--tilt-x", `${(-py * 4).toFixed(2)}deg`);
+        target.style.setProperty("--tilt-y", `${(px * 5).toFixed(2)}deg`);
+      });
+    };
+    const onTiltReset = () => {
+      const target = heroTiltRef.current;
+      if (!target) return;
+      target.style.setProperty("--tilt-x", "0deg");
+      target.style.setProperty("--tilt-y", "0deg");
+    };
+    const heroWrap = heroVisualRef.current;
+    if (window.matchMedia?.("(hover: hover)").matches && heroWrap) {
+      heroWrap.addEventListener("pointermove", onTilt);
+      heroWrap.addEventListener("pointerleave", onTiltReset);
+    }
     return () => {
       window.removeEventListener("scroll", onScroll);
       if (frame) window.cancelAnimationFrame(frame);
+      heroWrap?.removeEventListener("pointermove", onTilt);
+      heroWrap?.removeEventListener("pointerleave", onTiltReset);
+      if (tiltFrame) window.cancelAnimationFrame(tiltFrame);
     };
+  }, []);
+
+  // Headline word rise: the hero h1 enters word by word instead of as one
+  // block. Runs once; the ready-class guard keeps repeat invocations (HMR,
+  // StrictMode) from nesting word spans inside word spans.
+  const heroHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    const heading = heroHeadingRef.current;
+    if (!heading || heading.classList.contains("hero-words-ready")) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      heading.classList.add("hero-words-ready");
+      return;
+    }
+    heading.classList.add("hero-words-ready");
+    const words: HTMLSpanElement[] = [];
+    const splitNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const parts = node.textContent?.split(/(\s+)/) ?? [];
+        const frag = document.createDocumentFragment();
+        for (const part of parts) {
+          if (!part) continue;
+          if (/^\s+$/.test(part)) {
+            frag.appendChild(document.createTextNode(part));
+            continue;
+          }
+          const span = document.createElement("span");
+          span.className = "hero-word";
+          span.textContent = part;
+          words.push(span);
+          frag.appendChild(span);
+        }
+        node.parentNode?.replaceChild(frag, node);
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        for (const child of Array.from(node.childNodes)) splitNode(child);
+      }
+    };
+    for (const child of Array.from(heading.childNodes)) splitNode(child);
+    words.forEach((word, index) => {
+      word.style.animationDelay = `${120 + index * 70}ms`;
+    });
   }, []);
 
   // Cursor presence: spotlight cards carry a warm glow that tracks the
@@ -242,6 +338,8 @@ export default function Home() {
         Skip to content
       </a>
 
+      <div className="aasw-scroll-progress" aria-hidden="true"><span style={{ transform: `scaleX(${scrollProgress})` }} /></div>
+
       <header className={`site-header ${headerScrolled ? "site-header-scrolled" : ""}`}>
         <div className="container flex items-center justify-between gap-6 py-4">
           <ScrollLink href="#top" className="brand-lockup" onClick={closeMenu}>
@@ -306,7 +404,7 @@ export default function Home() {
           <div className="container hero-grid">
             <div className="hero-copy" ref={heroCopyRef}>
               <p className="eyebrow" data-reveal><span className="eyebrow-dot" />Aapka Apna Social Welfare Foundation</p>
-              <h1 data-reveal data-reveal-delay="1">Fueling women's success through <em>tech &amp; enterprise.</em></h1>
+              <h1 ref={heroHeadingRef} className="hero-headline">Fueling women's success through <em>tech &amp; enterprise.</em></h1>
               <p className="hero-intro" data-reveal data-reveal-delay="2">A human-centered organization in the heart of Uttar Pradesh, dedicated to bridging the divide in digital business ownership — 800+ women trained, 300+ businesses launched, 30+ eco-friendly projects across 5 districts.</p>
               <div className="hero-actions" data-reveal data-reveal-delay="3">
                 <ScrollLink href="#programs" className="button button-primary aasw-magnetic">
@@ -328,7 +426,7 @@ export default function Home() {
 
             <div className="hero-visual-wrap" ref={heroVisualRef} data-reveal="right" data-reveal-delay="2">
               <div className="hero-chapter">01 / AASW FOUNDATION</div>
-              <div className="hero-visual">
+              <div className="hero-visual" ref={heroTiltRef}>
                 <img src="/manus-storage/aasw-field-session_43c9b878.jpeg" alt="AASW women taking part in a capability-building field session" fetchPriority="high" decoding="async" />
                 <div className="hero-image-overlay" />
                 <div className="hero-caption">

@@ -2443,3 +2443,18 @@ main :is(p, li) > a:not(.button):not(.text-link):not(.nav-link) {
   .section-ink::after, .donate-section::after { animation: none; opacity: .4; }
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Homepage upgrade layer: reading-progress rail, hero word rise, hero tilt.
+   Sits last so it can layer on the established Civic Editorial styles.
+   ───────────────────────────────────────────────────────────────────────────── */
+.aasw-scroll-progress { position: fixed; top: 0; right: 0; left: 0; z-index: 60; height: 3px; pointer-events: none; }
+.aasw-scroll-progress span { display: block; height: 100%; background: linear-gradient(90deg, #2f6b52, #d09b3b 70%, #b56831); transform-origin: 0 50%; box-shadow: 0 1px 4px rgba(38, 29, 29, .25); }
+.hero-headline .hero-word { display: inline-block; opacity: 0; transform: translateY(.55em) rotate(1.5deg); animation: hero-word-rise 640ms cubic-bezier(.23, 1, .32, 1) forwards; will-change: transform, opacity; }
+@keyframes hero-word-rise { to { opacity: 1; transform: translateY(0) rotate(0deg); } }
+.hero-visual { transform: perspective(1100px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)); transition: transform 260ms cubic-bezier(.23, 1, .32, 1); will-change: transform; }
+@media (prefers-reduced-motion: reduce) {
+  .aasw-scroll-progress { display: none; }
+  .hero-headline .hero-word { opacity: 1; transform: none; animation: none; }
+  .hero-visual { transform: none; transition: none; }
+}

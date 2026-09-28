@@ -8,7 +8,7 @@ import { adminProcedure, memberProcedure, publicProcedure, router } from "../_co
 import { createMemberSetupToken, hashMemberSetupToken } from "../security/memberAccount";
 import { createMemberSession, MEMBER_SESSION_COOKIE } from "../security/memberSession";
 import { getMembershipValidity } from "@shared/memberMembership";
-import { storageGetSignedUrl, storagePut } from "../storage";
+import { storageGetSignedUrl, isLocalUploadMode, storageLocalUploadDataUrl, storagePut } from "../storage";
 import { nanoid } from "nanoid";
 
 const passwordInput = z.string().min(8, "Password must be at least 8 characters.").max(128).regex(/[a-z]/, "Password must include a lowercase letter.").regex(/[A-Z]/, "Password must include an uppercase letter.").regex(/\d/, "Password must include a number.").regex(/[^A-Za-z0-9]/, "Password must include a special character.");
@@ -169,7 +169,17 @@ export const memberRouter = router({
       try {
         profilePhotoUrl = await storageGetSignedUrl(member.profilePhotoKey);
       } catch (error) {
-        console.warn("[Member] Profile photo signed URL unavailable", { memberId: member.id, error: error instanceof Error ? error.message : "unknown" });
+        // Local dev has no Forge credentials, so signed URLs cannot be minted.
+        // Inline the locally stored photo instead; production always signs.
+        if (process.env.NODE_ENV === "production") {
+          console.warn("[Member] Profile photo signed URL unavailable", { memberId: member.id, error: error instanceof Error ? error.message : "unknown" });
+        } else if (isLocalUploadMode()) {
+          try {
+            profilePhotoUrl = storageLocalUploadDataUrl(member.profilePhotoKey);
+          } catch (localError) {
+            console.warn("[Member] Profile photo local read unavailable", { memberId: member.id, error: localError instanceof Error ? localError.message : "unknown" });
+          }
+        }
       }
     }
     return {
@@ -331,7 +341,15 @@ export const memberRouter = router({
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Your profile photo could not be securely uploaded. Please try again." });
     }
     await updateMemberProfilePhoto(member.id, stored);
-    return { profilePhotoUrl: await storageGetSignedUrl(stored.key) };
+    try {
+      return { profilePhotoUrl: await storageGetSignedUrl(stored.key) };
+    } catch (error) {
+      // The photo is already saved; only the display URL is missing. Local dev
+      // has no Forge credentials, so inline the local upload instead of
+      // reporting a failure for a photo that stored fine.
+      if (process.env.NODE_ENV === "production" || !isLocalUploadMode()) throw error;
+      return { profilePhotoUrl: storageLocalUploadDataUrl(stored.key) };
+    }
   }),
 
   admin: router({

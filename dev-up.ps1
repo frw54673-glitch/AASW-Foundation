@@ -69,6 +69,6 @@ else {
 }
 
 # 4. Start the app dev server in this window.
-Write-Host "[dev-up] Starting app dev server (pnpm dev)..." -ForegroundColor Yellow
-Set-Location $root
-pnpm dev
+$pnpmCmd = (Get-Command pnpm.cmd -ErrorAction SilentlyContinue).Source
+if (-not $pnpmCmd) { $pnpmCmd = (Get-Command pnpm -ErrorAction Stop).Source }
+& $pnpmCmd dev

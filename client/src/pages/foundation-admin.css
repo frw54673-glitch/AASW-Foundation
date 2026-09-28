@@ -54,3 +54,11 @@
 @media (prefers-reduced-motion: reduce) { .dashboard-shell-brand *, .dashboard-shell-brand *::before, .dashboard-shell-brand *::after, .foundation-admin-workspace [role="status"] { transition: none !important; animation: none !important; } }
 
 @media (prefers-reduced-motion: reduce) { .foundation-admin-workspace *, .foundation-admin-workspace *::before, .foundation-admin-workspace *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+/* ── Analytics chart cards (Foundation Admin workspace pulse + MIS portfolio) ── */
+.aasw-chart-card { border: 1px solid #e4ddd2; border-radius: 12px; background: #fffdf9; padding: 20px; box-shadow: 0 2px 0 rgba(41, 29, 29, .015); transition: transform 180ms cubic-bezier(.23, 1, .32, 1), box-shadow 180ms cubic-bezier(.23, 1, .32, 1); }
+.aasw-chart-card:hover { box-shadow: 0 10px 20px rgba(43, 36, 29, .07); transform: translateY(-3px); }
+.aasw-chart-card h2 { color: #261d1b; font-family: "DM Serif Display", Georgia, serif; font-weight: 400; letter-spacing: -.02em; line-height: 1.05; }
+.aasw-chart-tooltip { border: 1px solid #e4ddd2; border-radius: 8px; background: #fffaf0; padding: 8px 12px; color: #291d1d; font-size: 12px; box-shadow: 0 8px 18px rgba(43, 36, 29, .14); }
+.aasw-chart-card svg:focus { outline: none; }
+@media (prefers-reduced-motion: reduce) { .aasw-chart-card, .aasw-chart-card:hover { transform: none; transition: none; } }

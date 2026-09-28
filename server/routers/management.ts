@@ -4,7 +4,7 @@ import { z } from "zod";
 import { countMemberServiceCompletionsByStatus, createGalleryMedia, getFoundationManagementSummary, getGalleryDriveSyncConfig, getMemberById, getMembershipApplicationProofKey, getVolunteerApplicationByRef, listContactInquiries, listDonationIntents, listFoundationAdminAlerts, listFoundationMemberServiceCompletions, listFoundationMemberServiceRequests, listFoundationMemberSupportMessages, listGalleryMedia, listMemberCompletionActivity, listMembershipApplications, listPaymentTransactions, listVolunteerApplications, markFoundationAdminAlertRead, markVolunteerDecisionNotification, payMemberServiceCompletion, rejectMemberServiceCompletion, respondToMemberSupportMessage, saveGalleryDriveSyncConfig, updateContactInquiryStatus, updateDonationIntentStatus, updateGalleryMedia, updateMemberServiceRequestStatus, updateMembershipApplicationStatus, updateVolunteerApplicationStatus, verifyMemberServiceCompletion, writeMisAuditLog } from "../db";
 import { dispatchMemberPayoutStatusEmail } from "../email/memberPayoutNotification";
 import { dispatchVolunteerDecisionEmail } from "../email/volunteerNotification";
-import { storageGetLocalUpload, storageGetSignedUrl, storagePut } from "../storage";
+import { storageGetLocalUpload, storageGetSignedUrl, storageLocalUploadDataUrl, storagePut } from "../storage";
 import { adminProcedure, publicProcedure, router } from "../_core/trpc";
 
 const limitInput = z.object({ limit: z.number().int().min(1).max(100).default(50) });
@@ -59,7 +59,9 @@ export const managementRouter = router({
   memberships: router({
     list: adminProcedure.input(limitInput).query(({ input }) => listMembershipApplications(input.limit)),
     updateStatus: adminProcedure.input(z.object({ applicationRef: z.string().min(1), status: membershipStatus })).mutation(async ({ input }) => { await updateMembershipApplicationStatus(input.applicationRef, input.status); return { status: input.status }; }),
-    proofUrl: adminProcedure.input(z.object({ applicationRef: z.string().min(1) })).query(async ({ input }) => { const key = await getMembershipApplicationProofKey(input.applicationRef); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Membership proof was not found." }); return { url: await storageGetSignedUrl(key) }; }),
+    proofUrl: adminProcedure.input(z.object({ applicationRef: z.string().min(1) })).query(async ({ input }) => { const key = await getMembershipApplicationProofKey(input.applicationRef); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Membership proof was not found." }); try { return { url: await storageGetSignedUrl(key) }; } catch (error) { // Local dev has no Forge credentials, so signed URLs cannot be minted.
+  // Inline the locally stored upload instead; production always signs.
+  if (process.env.NODE_ENV === "production") throw error; return { url: storageLocalUploadDataUrl(key) }; } }),
   }),
   inquiries: router({ list: adminProcedure.input(limitInput).query(({ input }) => listContactInquiries(input.limit)), updateStatus: adminProcedure.input(z.object({ inquiryRef: z.string().min(1), status: inquiryStatus })).mutation(async ({ input }) => { await updateContactInquiryStatus(input.inquiryRef, input.status); return { status: input.status }; }) }),
   volunteers: router({

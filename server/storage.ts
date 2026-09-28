@@ -137,3 +137,17 @@ export function storageGetLocalUpload(relKey: string): { data: Buffer; mimeType:
   if (!mimeType) throw new Error("Unsupported proof file type");
   return { data: fs.readFileSync(target), mimeType };
 }
+
+// True when uploads are kept on local disk (no Forge credentials) and signed
+// URLs can never be minted — callers use this to pick the inline data-URL
+// fallback instead of failing the whole flow.
+export function isLocalUploadMode(): boolean {
+  return !ENV.forgeApiUrl || !ENV.forgeApiKey;
+}
+
+// Dev-only inline data URL for a locally stored upload. Same guards as
+// storageGetLocalUpload; production callers must never reach this.
+export function storageLocalUploadDataUrl(relKey: string): string {
+  const local = storageGetLocalUpload(relKey);
+  return `data:${local.mimeType};base64,${local.data.toString("base64")}`;
+}

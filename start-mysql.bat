@@ -1,0 +1,2 @@
+@echo off
+"C:\Users\om\Downloads\AASW-NEW-VERSION-main\AASW-NEW-VERSION-main\.local-mysql\binaries\9.7.2\mysql\bin\mysqld.exe" --no-defaults --port=3306 --datadir="C:\Users\om\Downloads\AASW-NEW-VERSION-main\AASW-NEW-VERSION-main\.local-mysql\data" --bind-address=127.0.0.1 --default-time-zone=+00:00 --console

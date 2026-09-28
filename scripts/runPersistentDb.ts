@@ -8,6 +8,7 @@
 // keep working without a re-download.
 import { execFile } from "child_process";
 import fs from "fs";
+import net from "net";
 import os from "os";
 import path from "path";
 
@@ -35,6 +36,21 @@ const initFile = path.join(storeRoot, "init.sql");
 fs.mkdirSync(dataDir, { recursive: true });
 
 const port = 3306;
+
+function isPortActive(p: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const s = new net.Socket();
+    s.connect(p, "127.0.0.1", () => { s.destroy(); resolve(true); });
+    s.on("error", () => { s.destroy(); resolve(false); });
+  });
+}
+
+if (await isPortActive(port)) {
+  console.log("EMBEDDED_MYSQL_READY (already active on 3306)");
+  console.log(`DB_HOST=127.0.0.1 DB_PORT=${port} DB_NAME=aasw DB_USER=root`);
+  setInterval(() => {}, 60000);
+} else {
+
 const alreadyInitialized = fs.existsSync(path.join(dataDir, "mysql"));
 
 if (!alreadyInitialized) {
@@ -121,3 +137,4 @@ await new Promise(r => setTimeout(r, 7000));
 console.log("EMBEDDED_MYSQL_READY");
 console.log(`DB_HOST=127.0.0.1 DB_PORT=${port} DB_NAME=aasw DB_USER=root`);
 setInterval(() => {}, 60000);
+}

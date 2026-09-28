@@ -29,6 +29,26 @@ function resolveLocalPublicStorageDir(): string {
 }
 const localPublicStorageDir = resolveLocalPublicStorageDir();
 
+// Dev uploads (no Forge credentials) are written to the project-local
+// .local-storage directory by server/storage.ts. Mirror that path resolution
+// here so published gallery photos uploaded in local development can be
+// served; private keys never reach this resolver (see canServePublicStorageKey).
+function resolveLocalUploadsDir(): string {
+  const candidates = [
+    path.resolve(import.meta.dirname, "../../.local-storage"), // dev: server/_core -> <root>/.local-storage
+    path.resolve(import.meta.dirname, "../.local-storage"), // bundled prod: dist -> <root>/.local-storage
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
+    } catch {
+      // try next candidate
+    }
+  }
+  return candidates[0];
+}
+const localUploadsDir = resolveLocalUploadsDir();
+
 const storageContentTypes: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -85,6 +105,24 @@ export function serveLocalStorageAsset(key: string, res: Response): boolean {
   return true;
 }
 
+/**
+ * Dev-only fallback: serves keys from the local uploads directory
+ * (.local-storage) where storagePut writes when Forge credentials are not
+ * configured. Only keys that already passed canServePublicStorageKey reach
+ * this — published gallery records — so private uploads under the same root
+ * are never exposed.
+ */
+export function serveLocalUploadAsset(key: string, res: Response): boolean {
+  const localPath = path.join(localUploadsDir, key);
+  if (!localPath.startsWith(localUploadsDir + path.sep)) return false;
+  if (!fs.existsSync(localPath) || !fs.statSync(localPath).isFile()) return false;
+  const contentType = storageContentTypes[path.extname(key).toLowerCase()];
+  if (!contentType) return false;
+  res.set("Cache-Control", "public, max-age=86400");
+  res.type(contentType).sendFile(localPath);
+  return true;
+}
+
 export function registerStorageProxy(app: Express) {
   app.get("/manus-storage/*", async (req, res) => {
     const key = (req.params as Record<string, string>)[0];
@@ -101,8 +139,10 @@ export function registerStorageProxy(app: Express) {
     if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
       // Without storage-backend credentials the committed public assets are
       // served from disk; private and unpublished keys were already rejected
-      // by canServePublicStorageKey above.
+      // by canServePublicStorageKey above. Local dev uploads (published
+      // gallery photos) live under .local-storage and are served next.
       if (serveLocalStorageAsset(key, res)) return;
+      if (serveLocalUploadAsset(key, res)) return;
       res.status(500).send("Storage proxy not configured");
       return;
     }

@@ -39,7 +39,56 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+async function ensureDatabaseRunning() {
+  const isFree = await isPortAvailable(3306);
+  if (!isFree) {
+    console.log("[AutoDB] Local MySQL is active on 127.0.0.1:3306.");
+    return;
+  }
+
+  console.log("[AutoDB] Local MySQL is not running on 3306. Auto-booting persistent database...");
+  try {
+    const { spawn } = await import("child_process");
+    const path = await import("path");
+    const scriptPath = path.resolve(process.cwd(), "scripts/runPersistentDb.ts");
+    const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+
+    // Windows: spawning .cmd/.bat files requires shell:true since the
+    // CVE-2024-27980 Node fix (otherwise spawn always fails with EINVAL).
+    // Arguments are quoted explicitly because shell mode joins them verbatim.
+    const useShell = process.platform === "win32";
+    const dbProc = spawn(
+      useShell ? `"${pnpmCmd}"` : pnpmCmd,
+      useShell ? ["exec", "tsx", `"${scriptPath}"`] : ["exec", "tsx", scriptPath],
+      {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        shell: useShell,
+      },
+    );
+    dbProc.on("error", (spawnError) => {
+      console.error("[AutoDB] Persistent database process could not start:", spawnError);
+    });
+    dbProc.unref();
+
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const free = await isPortAvailable(3306);
+      if (!free) {
+        console.log("[AutoDB] Local MySQL is UP on 127.0.0.1:3306.");
+        return;
+      }
+    }
+    console.warn("[AutoDB] Warning: MySQL did not respond on 3306 within 20s.");
+  } catch (err) {
+    console.error("[AutoDB] Failed to auto-start MySQL:", err);
+  }
+}
+
 async function startServer() {
+  await ensureDatabaseRunning();
   const app = express();
   const server = createServer(app);
   app.disable("x-powered-by");
@@ -111,8 +160,8 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${port}/ (or http://127.0.0.1:${port}/)`);
   });
 
   // Graceful shutdown: stop accepting new connections, let in-flight
