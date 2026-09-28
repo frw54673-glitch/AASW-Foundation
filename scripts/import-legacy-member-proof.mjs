@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { storagePut } from "../server/storage.ts";
-import { encryptSensitiveValue } from "../server/security/sensitive.ts";
+import { storagePut } from "../backend/storage.ts";
+import { encryptSensitiveValue } from "../backend/security/sensitive.ts";
 
 const sourceFile = process.env.SOURCE_FILE;
 const storageKey = process.env.STORAGE_KEY;

@@ -1,6 +1,6 @@
 // Dev-only helper: lists RecordSection call sites for the progressive-loading edit.
 import fs from "fs";
-const c = fs.readFileSync("client/src/pages/FoundationAdminPage.tsx", "utf8");
+const c = fs.readFileSync("frontend/src/pages/FoundationAdminPage.tsx", "utf8");
 const re = /<RecordSection title="([^"]+)"([^>]*)>/g;
 let m;
 let count = 0;

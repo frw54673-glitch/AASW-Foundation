@@ -8,10 +8,10 @@
 import { chromium } from "playwright";
 import { drizzle } from "drizzle-orm/mysql2";
 import { eq } from "drizzle-orm";
-import { members, memberMembershipCycles, membershipApplications } from "../drizzle/schema.ts";
+import { members, memberMembershipCycles, membershipApplications } from "../backend/drizzle/schema.ts";
 import bcrypt from "bcryptjs";
-import { expireDueMemberships } from "../server/db.ts";
-import { encryptSensitiveValue, hashSensitiveMatchValue } from "../server/security/sensitive.ts";
+import { expireDueMemberships } from "../backend/db.ts";
+import { encryptSensitiveValue, hashSensitiveMatchValue } from "../backend/security/sensitive.ts";
 
 const TEST_EMAIL = "renewal.e2e@aaswfoundation.test";
 const TEST_PAN = "RENEWPAN1234A"; // 12 chars for PAN pattern? PAN is 10 - use exact 10

@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import { membershipApplications, members } from "../drizzle/schema.ts";
+import { membershipApplications, members } from "../backend/drizzle/schema.ts";
 
 const PASSWORD = process.env.SEED_PASSWORD || "AaswTest#2026";
 const EMAIL = "demo.member@aaswfoundation.test";

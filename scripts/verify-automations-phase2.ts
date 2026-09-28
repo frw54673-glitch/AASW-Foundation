@@ -9,11 +9,11 @@ import { createServer } from "node:http";
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { and, eq, like } from "drizzle-orm";
-import { getDb, expireDueMemberships, claimSevenDayExpiryReminderCandidates, claimPostGraceRenewalFollowUpCandidates, markMembershipExpiryReminder, recordMembershipExpiryAutomationRun, recordMembershipReminderAutomationRun, createMembershipApplicationWithActivation } from "../server/db";
-import { handleMembershipExpirySchedule } from "../server/scheduled/membershipExpiry";
-import { handleMembershipReminderSchedule as reminderHandler } from "../server/scheduled/membershipReminder";
-import { encryptSensitiveValue, hashSensitiveMatchValue } from "../server/security/sensitive";
-import { membershipExpiryAutomation, membershipReminderAutomation, members, memberMembershipCycles, membershipApplications, memberExpiryReminders, foundationAdminAlerts, accountSetupTokens } from "../drizzle/schema";
+import { getDb, expireDueMemberships, claimSevenDayExpiryReminderCandidates, claimPostGraceRenewalFollowUpCandidates, markMembershipExpiryReminder, recordMembershipExpiryAutomationRun, recordMembershipReminderAutomationRun, createMembershipApplicationWithActivation } from "../backend/db";
+import { handleMembershipExpirySchedule } from "../backend/scheduled/membershipExpiry";
+import { handleMembershipReminderSchedule as reminderHandler } from "../backend/scheduled/membershipReminder";
+import { encryptSensitiveValue, hashSensitiveMatchValue } from "../backend/security/sensitive";
+import { membershipExpiryAutomation, membershipReminderAutomation, members, memberMembershipCycles, membershipApplications, memberExpiryReminders, foundationAdminAlerts, accountSetupTokens } from "../backend/drizzle/schema";
 
 const hasDb = await getDb();
 if (!hasDb) { console.error("FAIL no local DB"); process.exit(1); }
@@ -233,7 +233,7 @@ const [m6] = await db.insert(members).values({
 });
 const [m6row] = await db.select().from(members).where(eq(members.email, `${PREFIX}m6@x.test`)).limit(1);
 await db.insert(memberMembershipCycles).values({ memberId: m6row.id, applicationRef: appRef("M6"), cycleNumber: 1, membershipType: "annual", startsOn: m6Join, expiresOn: new Date(thisY - 1, thisM - 1, thisD + 365 - 10), status: "active" });
-const { expireMemberIfDue, getMemberById } = await import("../server/db");
+const { expireMemberIfDue, getMemberById } = await import("../backend/db");
 const lazy = await expireMemberIfDue(await getMemberById(m6row.id));
 const [m6After] = await db.select().from(members).where(eq(members.id, m6row.id));
 pass("lazy expiry on member session/login (expireMemberIfDue) flips overdue member", lazy === true && m6After.status === "expired" && m6After.accountStatus === "inactive", `lazy=${lazy} status=${m6After.status}/${m6After.accountStatus}`);
