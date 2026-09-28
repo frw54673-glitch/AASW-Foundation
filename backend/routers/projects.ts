@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { UN_SDG_GOALS, suggestProjectCode } from "@shared/mis";
-import { createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects } from "../db";
+import { createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects, assignProjectToAllActiveMembers } from "../db";
 import { misProjectReadProcedure, misProjectWriteProcedure, router } from "../_core/trpc";
 
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.");
@@ -17,7 +17,19 @@ export const projectRouter = router({
   get: misProjectReadProcedure.input(z.object({ projectId: z.number().int().positive() })).query(async ({ input }) => { const record = await getMisProject(input.projectId); if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Project was not found." }); return record; }),
   create: misProjectWriteProcedure.input(projectInput).mutation(async ({ input, ctx }) => {
     const projectCode = input.projectCode ?? suggestProjectCode(await getNextProjectSequence());
-    try { const id = await createMisProject({ ...input, projectCode, startDate: asDate(input.startDate), endDate: asDate(input.endDate), createdByOpenId: ctx.user.openId }); return { id, projectCode }; }
+    try {
+      const id = await createMisProject({ ...input, projectCode, startDate: asDate(input.startDate), endDate: asDate(input.endDate), createdByOpenId: ctx.user.openId });
+      // Auto-share automation: surface the new project in every active
+      // member's portal right away. Assignment failure must never block
+      // project creation, so it is logged and swallowed here.
+      try {
+        const assigned = await assignProjectToAllActiveMembers(id, ctx.user.openId);
+        if (assigned > 0) console.log(`[projects] Auto-shared project ${projectCode} with ${assigned} active member(s).`);
+      } catch (assignmentError) {
+        console.error("[projects] Auto-share assignment failed:", assignmentError);
+      }
+      return { id, projectCode };
+    }
     catch (error) { if (String(error).includes("Duplicate")) throw new TRPCError({ code: "CONFLICT", message: "Project code already exists. Please use a different code." }); throw error; }
   }),
   partners: router({

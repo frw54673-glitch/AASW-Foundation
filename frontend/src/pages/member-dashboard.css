@@ -412,3 +412,8 @@
 .member-next-step-card.maroon { border-color: #e0c3bc; } .member-next-step-card.maroon .member-next-step-icon { background: #f7ece8; color: #9c4a3c; }
 @media (max-width: 768px) { .member-next-steps-list { grid-template-columns: 1fr; } }
 
+
+/* Live MIS projects strip on the member services page (auto-shared from the
+   Foundation MIS). Reuses member-programme-grid/card styling for the cards. */
+.member-live-projects { margin-top: 18px; display: grid; gap: 12px; }
+.member-live-projects > p { margin: 0; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #9c4a3c; }

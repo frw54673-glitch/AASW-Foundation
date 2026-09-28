@@ -227,6 +227,10 @@ export const memberServiceRequests = mysqlTable("member_service_requests", {
   requestRef: varchar("requestRef", { length: 40 }).notNull().unique(),
   memberId: int("memberId").notNull().references(() => members.id, { onDelete: "cascade" }),
   serviceType: mysqlEnum("serviceType", ["digital_skill_development", "green_entrepreneurship", "mentorship_business_support", "workshops_seminars", "building_community"]).notNull(),
+  // Optional MIS project link: lets a member route a programme request at a
+  // specific live project. The member sees the project in their portal and
+  // the Foundation team sees it on the programme-request workspace card.
+  projectId: int("projectId").references(() => projects.id, { onDelete: "set null" }),
   message: text("message"),
   status: mysqlEnum("status", ["submitted", "reviewing", "accepted", "not_available", "completed", "closed"]).notNull().default("submitted"),
   adminNote: text("adminNote"),

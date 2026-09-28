@@ -1,1 +1,1 @@
-CREATE INDEX `member_service_requests_member_id_idx` ON `member_service_requests` (`memberId`);
+-- Index creation moved to 0030 (must precede the unique-index drop it enables).

@@ -1,0 +1,2 @@
+ALTER TABLE `member_service_requests` ADD `projectId` int;--> statement-breakpoint
+ALTER TABLE `member_service_requests` ADD CONSTRAINT `member_service_requests_projectId_projects_id_fk` FOREIGN KEY (`projectId`) REFERENCES `projects`(`id`) ON DELETE set null ON UPDATE no action;

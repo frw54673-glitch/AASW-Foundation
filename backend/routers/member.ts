@@ -292,10 +292,20 @@ export const memberRouter = router({
     return { completion: result.completion, created: result.created };
   }),
 
-  joinService: memberProcedure.input(z.object({ serviceType: z.enum(memberServiceTypes), message: z.string().trim().max(1200).optional() })).mutation(async ({ input, ctx }) => {
+  joinService: memberProcedure.input(z.object({ serviceType: z.enum(memberServiceTypes), projectId: z.number().int().positive().optional(), message: z.string().trim().max(1200).optional() })).mutation(async ({ input, ctx }) => {
     const member = await getMemberById(ctx.member.id);
     if (!member || member.status !== "active" || member.accountStatus !== "active") throw new TRPCError({ code: "FORBIDDEN", message: "This member account is not active." });
-    const result = await createMemberServiceRequest({ requestRef: `AASW-SRV-${nanoid(12).toUpperCase()}`, memberId: member.id, serviceType: input.serviceType, message: input.message });
+    // A request may point at one of the member's own assigned projects only —
+    // the member portal project selector is the source of these ids.
+    let projectId: number | null = null;
+    if (input.projectId) {
+      const assignments = await listMemberProjectAssignments(member.id);
+      if (!assignments.some(assignment => assignment.projectId === input.projectId)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "This project is not assigned to your member account." });
+      }
+      projectId = input.projectId;
+    }
+    const result = await createMemberServiceRequest({ requestRef: `AASW-SRV-${nanoid(12).toUpperCase()}`, memberId: member.id, serviceType: input.serviceType, projectId, message: input.message });
     return { request: result.request, created: result.created };
   }),
 

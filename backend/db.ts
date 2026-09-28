@@ -463,7 +463,7 @@ export async function listMemberProjectAssignments(memberId: number) {
 export type MemberServiceType = "digital_skill_development" | "green_entrepreneurship" | "mentorship_business_support" | "workshops_seminars" | "building_community";
 export type MemberServiceRequestStatus = "submitted" | "reviewing" | "accepted" | "not_available" | "completed" | "closed";
 
-export async function createMemberServiceRequest(input: { requestRef: string; memberId: number; serviceType: MemberServiceType; message?: string }) {
+export async function createMemberServiceRequest(input: { requestRef: string; memberId: number; serviceType: MemberServiceType; projectId?: number | null; message?: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for member service requests.");
   // Only an in-flight request (not yet completed/closed) blocks a new one for
@@ -472,7 +472,7 @@ export async function createMemberServiceRequest(input: { requestRef: string; me
   const [existing] = await db.select().from(memberServiceRequests).where(and(eq(memberServiceRequests.memberId, input.memberId), eq(memberServiceRequests.serviceType, input.serviceType), inArray(memberServiceRequests.status, ["submitted", "reviewing", "accepted"]))).limit(1);
   if (existing) return { request: existing, created: false };
   try {
-    const result = await db.insert(memberServiceRequests).values({ ...input, message: input.message || null });
+    const result = await db.insert(memberServiceRequests).values({ requestRef: input.requestRef, memberId: input.memberId, serviceType: input.serviceType, projectId: input.projectId ?? null, message: input.message || null });
     const [request] = await db.select().from(memberServiceRequests).where(eq(memberServiceRequests.id, Number(result[0].insertId))).limit(1);
     if (!request) throw new Error("Member service request could not be saved.");
     return { request, created: true };
@@ -487,13 +487,13 @@ export async function createMemberServiceRequest(input: { requestRef: string; me
 export async function listMemberServiceRequests(memberId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for member service requests.");
-  return db.select({ requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, message: memberServiceRequests.message, status: memberServiceRequests.status, adminNote: memberServiceRequests.adminNote, reviewedAt: memberServiceRequests.reviewedAt, createdAt: memberServiceRequests.createdAt, updatedAt: memberServiceRequests.updatedAt }).from(memberServiceRequests).where(eq(memberServiceRequests.memberId, memberId)).orderBy(desc(memberServiceRequests.createdAt));
+  return db.select({ requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, projectId: memberServiceRequests.projectId, projectCode: projects.projectCode, projectName: projects.projectName, message: memberServiceRequests.message, status: memberServiceRequests.status, adminNote: memberServiceRequests.adminNote, reviewedAt: memberServiceRequests.reviewedAt, createdAt: memberServiceRequests.createdAt, updatedAt: memberServiceRequests.updatedAt }).from(memberServiceRequests).leftJoin(projects, eq(memberServiceRequests.projectId, projects.id)).where(eq(memberServiceRequests.memberId, memberId)).orderBy(desc(memberServiceRequests.createdAt));
 }
 
 export async function listFoundationMemberServiceRequests(limit: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for Foundation service requests.");
-  return db.select({ requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, message: memberServiceRequests.message, status: memberServiceRequests.status, adminNote: memberServiceRequests.adminNote, reviewedAt: memberServiceRequests.reviewedAt, createdAt: memberServiceRequests.createdAt, fullName: members.fullName, membershipNo: members.membershipNo, email: members.email }).from(memberServiceRequests).innerJoin(members, eq(memberServiceRequests.memberId, members.id)).orderBy(desc(memberServiceRequests.createdAt)).limit(limit);
+  return db.select({ requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, projectId: memberServiceRequests.projectId, projectCode: projects.projectCode, projectName: projects.projectName, message: memberServiceRequests.message, status: memberServiceRequests.status, adminNote: memberServiceRequests.adminNote, reviewedAt: memberServiceRequests.reviewedAt, createdAt: memberServiceRequests.createdAt, fullName: members.fullName, membershipNo: members.membershipNo, email: members.email }).from(memberServiceRequests).innerJoin(members, eq(memberServiceRequests.memberId, members.id)).leftJoin(projects, eq(memberServiceRequests.projectId, projects.id)).orderBy(desc(memberServiceRequests.createdAt)).limit(limit);
 }
 
 export async function updateMemberServiceRequestStatus(input: { requestRef: string; status: MemberServiceRequestStatus; adminNote?: string; reviewedByOpenId: string }) {
@@ -744,6 +744,23 @@ export async function assignMemberToProject(input: { memberId: number; projectId
   }
   const result = await db.insert(memberProjectAssignments).values({ ...input, assignmentStatus: "active" });
   return Number(result[0].insertId);
+}
+
+/** Auto-share automation: every active member receives the assignment, so a
+ * newly created (or previously unshared) project appears in the member portal
+ * immediately without a manual per-member assignment step. Existing
+ * assignments (any status) are left untouched so admin-controlled roles and
+ * deactivations survive re-runs. */
+export async function assignProjectToAllActiveMembers(projectId: number, assignedByOpenId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for member project assignment.");
+  const activeMembers = await db.select({ id: members.id }).from(members).where(and(eq(members.status, "active"), eq(members.accountStatus, "active")));
+  if (!activeMembers.length) return 0;
+  const assignedMemberIds = new Set((await db.select({ memberId: memberProjectAssignments.memberId }).from(memberProjectAssignments).where(eq(memberProjectAssignments.projectId, projectId))).map(row => row.memberId));
+  const pending = activeMembers.filter(member => !assignedMemberIds.has(member.id));
+  if (!pending.length) return 0;
+  const result = await db.insert(memberProjectAssignments).values(pending.map(member => ({ memberId: member.id, projectId, projectRole: "Member", assignedByOpenId, assignmentStatus: "active" as const })));
+  return result[0].affectedRows ?? pending.length;
 }
 
 /** Idempotent newsletter subscribe: re-subscribing a known email only restores its status. */
