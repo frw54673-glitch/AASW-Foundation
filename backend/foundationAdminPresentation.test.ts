@@ -28,10 +28,13 @@ describe("Foundation Admin presentation", () => {
   });
 
   it("uses a Foundation-branded access gate instead of a generic dashboard sign-in screen", () => {
-    expect(adminSource).toContain('import { startLogin } from "@/const"');
+    // The gate routes to the owner email+password login page; the platform
+    // OAuth flow (startLogin) is intentionally no longer part of the admin path.
+    expect(adminSource).not.toContain("startLogin");
     expect(adminSource).toContain("foundation-admin-access-shell");
     expect(adminSource).toContain("Sign in to Foundation Admin");
-    expect(adminSource).toContain("onClick={() => startLogin()}");
+    expect(adminSource).toContain('window.location.assign("/foundation-admin/login")');
+    expect(adminSource).toContain("aaswfoundation06@gmail.com");
     expect(adminStyles).toContain(".foundation-admin-access-shell");
     expect(adminStyles).toContain(".foundation-admin-access-shell button:focus-visible");
   });
