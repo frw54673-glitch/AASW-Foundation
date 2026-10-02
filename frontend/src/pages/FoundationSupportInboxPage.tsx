@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CheckCircle2, ClipboardList, LifeBuoy, LockKeyhole, RefreshCw, Send, ShieldAlert, Users } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
+
 import { trpc } from "@/lib/trpc";
 import { notifyError, notifySuccess } from "@/lib/notifications";
 import "./foundation-admin.css";
@@ -20,7 +20,7 @@ const dateTime = (value: Date | string) => new Date(value).toLocaleString("en-IN
 export function FoundationSupportInboxPage() {
   const { user, loading } = useAuth();
   if (loading) return <main className="min-h-screen bg-[#fffdf7]" />;
-  if (!user) return <main className="grid min-h-screen place-items-center bg-[#fffdf7] p-6 text-center text-[#291d1d]"><section className="max-w-md border border-[#291d1d]/15 bg-white p-8"><LockKeyhole className="mx-auto text-[#2f6b52]" size={28} /><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[#2f6b52]">Foundation support inbox</p><h1 className="mt-2 font-serif text-4xl">Member support, with care.</h1><p className="mt-4 text-sm leading-6 text-[#5b4c47]">Sign in with an authorised Foundation account to review and reply to member support messages.</p><button type="button" onClick={() => startLogin()} className="mt-6 bg-[#2f6b52] px-4 py-3 text-xs font-bold uppercase tracking-wider text-white">Sign in to continue</button></section></main>;
+  if (!user) return <main className="grid min-h-screen place-items-center bg-[#fffdf7] p-6 text-center text-[#291d1d]"><section className="max-w-md border border-[#291d1d]/15 bg-white p-8"><LockKeyhole className="mx-auto text-[#2f6b52]" size={28} /><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[#2f6b52]">Foundation support inbox</p><h1 className="mt-2 font-serif text-4xl">Member support, with care.</h1><p className="mt-4 text-sm leading-6 text-[#5b4c47]">Sign in with an authorised Foundation account to review and reply to member support messages.</p><button type="button" onClick={() => { window.location.assign("/foundation-admin/login"); }} className="mt-6 bg-[#2f6b52] px-4 py-3 text-xs font-bold uppercase tracking-wider text-white">Sign in to continue</button></section></main>;
   if (user.role !== "admin") return <DashboardLayout menuItems={menu} title="AASW Foundation"><section className="mx-auto mt-14 max-w-2xl border border-red-200 bg-red-50 p-8 text-red-950"><ShieldAlert size={28} /><p className="mt-4 text-xs font-bold uppercase tracking-[.14em]">Restricted workspace</p><h1 className="mt-2 font-serif text-4xl">Foundation management is admin-only.</h1></section></DashboardLayout>;
   return <DashboardLayout menuItems={menu} title="AASW Foundation"><SupportInbox /></DashboardLayout>;
 }

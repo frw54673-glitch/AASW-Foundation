@@ -41,6 +41,15 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
 
   if (!isUnauthorized) return;
 
+  // Foundation Admin and MIS screens authenticate through the owner login
+  // page (email + password); the platform OAuth flow is not part of this
+  // deployment, so a stale or missing admin session lands on that page.
+  const path = window.location.pathname;
+  if (path.startsWith("/foundation-admin") || path.startsWith("/mis")) {
+    window.location.assign("/foundation-admin/login");
+    return;
+  }
+
   startLogin();
 };
 
