@@ -5,6 +5,7 @@ type RateLimitEntry = { count: number; resetAt: number };
 
 const rules: Record<string, RateLimitRule> = {
   "member.login": { id: "member.login", maxAttempts: 8, windowMs: 15 * 60 * 1000 },
+  "auth.ownerLogin": { id: "auth.ownerLogin", maxAttempts: 8, windowMs: 15 * 60 * 1000 },
   "member.requestPasswordReset": { id: "member.requestPasswordReset", maxAttempts: 5, windowMs: 15 * 60 * 1000 },
   "member.setupPassword": { id: "member.setupPassword", maxAttempts: 5, windowMs: 15 * 60 * 1000 },
   "member.resetPassword": { id: "member.resetPassword", maxAttempts: 5, windowMs: 15 * 60 * 1000 },

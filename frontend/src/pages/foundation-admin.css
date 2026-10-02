@@ -62,3 +62,7 @@
 .aasw-chart-tooltip { border: 1px solid #e4ddd2; border-radius: 8px; background: #fffaf0; padding: 8px 12px; color: #291d1d; font-size: 12px; box-shadow: 0 8px 18px rgba(43, 36, 29, .14); }
 .aasw-chart-card svg:focus { outline: none; }
 @media (prefers-reduced-motion: reduce) { .aasw-chart-card, .aasw-chart-card:hover { transform: none; transition: none; } }
+
+/* Foundation owner login form on the access shell. */
+.foundation-admin-login-form { display: grid; gap: 14px; max-width: 360px; margin: 26px auto 0; text-align: left; }.foundation-admin-login-form label { display: grid; gap: 6px; color: rgba(255,250,240,.82); font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }.foundation-admin-login-form input { border: 1px solid rgba(255,250,240,.35); border-radius: 8px; background: rgba(255,250,240,.12); padding: 11px 14px; color: #fffaf0; font-size: 14px; font-weight: 400; letter-spacing: 0; text-transform: none; outline: none; transition: border-color 150ms ease, box-shadow 150ms ease; }.foundation-admin-login-form input:focus { border-color: #eac06e; box-shadow: 0 0 0 3px rgba(234,192,110,.25); }.foundation-admin-login-form button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }.foundation-admin-login-form button:disabled { opacity: .7; transform: none; }
+.foundation-admin-access-shell [data-login-error] { color: #ffd7cf; font-weight: 700; }

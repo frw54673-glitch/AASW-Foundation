@@ -110,6 +110,20 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+/** The Foundation owner login only authenticates the single seeded account
+ * that carries a password hash (aaswfoundation06@gmail.com). Every other
+ * email is rejected before any password comparison happens. */
+export async function getOwnerLoginUser(email: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get owner login user: database not available");
+    return undefined;
+  }
+  const result = await db.select().from(users).where(eq(users.email, email.trim().toLowerCase())).limit(1);
+  const user = result.length > 0 ? result[0] : undefined;
+  return user?.passwordHash ? user : undefined;
+}
+
 export async function createPaymentTransaction(transaction: InsertPaymentTransaction) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for payment transaction creation.");

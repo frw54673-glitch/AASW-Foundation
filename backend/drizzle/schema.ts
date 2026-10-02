@@ -17,6 +17,10 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin", "project_manager", "field_staff", "finance", "monitoring", "management"]).default("user").notNull(),
+  /** Optional local credential for the Foundation owner login. Only the seeded
+   * owner account (aaswfoundation06@gmail.com) carries a hash; everyone else
+   * signs in through the platform OAuth flow. */
+  passwordHash: varchar("passwordHash", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
