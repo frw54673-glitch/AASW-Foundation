@@ -1,10 +1,11 @@
+import bcrypt from "bcryptjs";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { createMemberCertificateEmailToken, createMembershipApplicationWithActivation, markMembershipApplicationNotification } from "../db";
 import { dispatchMemberActivationEmail } from "../email/memberActivation";
 import { dispatchMembershipApplicationNotification } from "../email/membershipNotification";
-import { createMemberSetupToken } from "../security/memberAccount";
+import { createMemberSetupToken, generateMemberPassword } from "../security/memberAccount";
 import { encryptSensitiveValue, hashSensitiveMatchValue } from "../security/sensitive";
 import { storagePut } from "../storage";
 import { publicProcedure, router } from "../_core/trpc";
@@ -72,6 +73,11 @@ export const membershipRouter = router({
     }
 
     const setup = createMemberSetupToken();
+    // Direct-login automation: generate a strong readable password, store its
+    // hash on the new member account and deliver the plaintext once in the
+    // welcome email so the member can sign in immediately.
+    const loginPassword = generateMemberPassword();
+    const loginPasswordHash = await bcrypt.hash(loginPassword, 12);
     let activation: { memberId: number; membershipNo: string; isRenewal: boolean };
     try {
       activation = await createMembershipApplicationWithActivation({
@@ -95,6 +101,7 @@ export const membershipRouter = router({
           status: "approved",
           notificationStatus: "pending",
         },
+        passwordHash: loginPasswordHash,
         setupTokenHash: setup.tokenHash,
         setupTokenExpiresAt: setup.expiresAt,
         renewalIntent: input.renewalIntent,
@@ -116,11 +123,11 @@ export const membershipRouter = router({
       return { applicationRef, membershipNo: activation.membershipNo, status: "approved" as const, renewal: true as const, notificationStatus: notification === "sent" ? "sent" as const : "failed" as const, activationEmailStatus: "not_required" as const };
     }
 
-    const setupUrl = `${memberAppBaseUrl(ctx.req)}/member/setup-password?token=${encodeURIComponent(setup.token)}`;
+    const loginUrl = `${memberAppBaseUrl(ctx.req)}/member/login`;
     const certificateEmailToken = createMemberSetupToken();
     await createMemberCertificateEmailToken(activation.memberId, certificateEmailToken.tokenHash, certificateEmailToken.expiresAt);
     const certificateUrl = `${memberAppBaseUrl(ctx.req)}/member/email-certificate?token=${encodeURIComponent(certificateEmailToken.token)}`;
-    const activationEmail = await dispatchMemberActivationEmail({ fullName: input.fullName, email: input.email, membershipNo: activation.membershipNo, setupUrl, certificateUrl });
+    const activationEmail = await dispatchMemberActivationEmail({ fullName: input.fullName, email: input.email, membershipNo: activation.membershipNo, loginPassword, loginUrl, certificateUrl });
 
     return { applicationRef, membershipNo: activation.membershipNo, status: "approved" as const, renewal: false as const, notificationStatus: notification === "sent" ? "sent" as const : "failed" as const, activationEmailStatus: activationEmail === "sent" || activationEmail === "mocked" ? activationEmail : "failed" as const };
   }),

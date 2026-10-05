@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createMembershipApplicationWithActivation, createMemberCertificateEmailToken, markMembershipApplicationNotification, storagePut, dispatchMembershipApplicationNotification, dispatchMemberActivationEmail, createMemberSetupToken } = vi.hoisted(() => ({
+const { createMembershipApplicationWithActivation, createMemberCertificateEmailToken, markMembershipApplicationNotification, storagePut, dispatchMembershipApplicationNotification, dispatchMemberActivationEmail, createMemberSetupToken, generateMemberPassword } = vi.hoisted(() => ({
   createMembershipApplicationWithActivation: vi.fn(),
   createMemberCertificateEmailToken: vi.fn(),
   markMembershipApplicationNotification: vi.fn(),
@@ -8,13 +8,14 @@ const { createMembershipApplicationWithActivation, createMemberCertificateEmailT
   dispatchMembershipApplicationNotification: vi.fn(),
   dispatchMemberActivationEmail: vi.fn(),
   createMemberSetupToken: vi.fn(),
+  generateMemberPassword: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ createMembershipApplicationWithActivation, createMemberCertificateEmailToken, markMembershipApplicationNotification }));
 vi.mock("./storage", () => ({ storagePut }));
 vi.mock("./email/membershipNotification", () => ({ dispatchMembershipApplicationNotification }));
 vi.mock("./email/memberActivation", () => ({ dispatchMemberActivationEmail }));
-vi.mock("./security/memberAccount", () => ({ createMemberSetupToken }));
+vi.mock("./security/memberAccount", () => ({ createMemberSetupToken, generateMemberPassword }));
 
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
@@ -31,6 +32,7 @@ describe("Membership submission workflow boundaries", () => {
     createMembershipApplicationWithActivation.mockResolvedValue({ memberId: 9, membershipNo: "AASW-2026-0002" });
     dispatchMembershipApplicationNotification.mockResolvedValue("sent");
     dispatchMemberActivationEmail.mockResolvedValue("sent");
+    generateMemberPassword.mockReturnValue("Aasw@TestXk9");
     createMemberSetupToken.mockReturnValueOnce({ token: "setup-token-for-integration-testing", tokenHash: "b".repeat(64), expiresAt: new Date("2026-08-17T00:00:00.000Z") }).mockReturnValueOnce({ token: "certificate-token-for-integration-testing", tokenHash: "c".repeat(64), expiresAt: new Date("2026-08-17T00:00:00.000Z") });
     createMemberCertificateEmailToken.mockResolvedValue(undefined);
     markMembershipApplicationNotification.mockResolvedValue(undefined);
@@ -53,5 +55,13 @@ describe("Membership submission workflow boundaries", () => {
     expect(result.status).toBe("approved");
     expect(createMemberCertificateEmailToken).toHaveBeenCalledWith(9, "c".repeat(64), expect.any(Date));
     expect(dispatchMemberActivationEmail).toHaveBeenCalledWith(expect.objectContaining({ email: "boundary@example.com", membershipNo: "AASW-2026-0002", certificateUrl: expect.stringContaining("/member/email-certificate?token=") }));
+    // Direct-login automation: the stored hash and the emailed password must
+    // belong to the same generated credential.
+    const activationInput = createMembershipApplicationWithActivation.mock.calls[0][0];
+    expect(activationInput.passwordHash).toMatch(/^\$2[aby]\$\d{2}\$/);
+    const emailedPassword = dispatchMemberActivationEmail.mock.calls[0][0].loginPassword;
+    expect(emailedPassword).toMatch(/^Aasw@/);
+    const bcrypt = await import("bcryptjs");
+    expect(bcrypt.compareSync(emailedPassword, activationInput.passwordHash)).toBe(true);
   });
 });

@@ -34,8 +34,8 @@ describe("member certificate email access", () => {
     expect(memberRouter).toContain("emailCertificateStatus");
     expect(memberRouter).toContain("hashMemberSetupToken(input.token)");
     expect(memberRouter).toContain('return { valid: false as const, certificate: null }');
-    expect(activationEmail).toContain("Your AASW Foundation Membership Is Approved");
-    expect(activationEmail).toContain("View your membership certificate within 72 hours");
+    expect(activationEmail).toContain("Welcome to AASW Foundation — Your Member Login Details Inside");
+    expect(activationEmail).toContain("Download your membership certificate within 72 hours");
     expect(activationEmail).toContain("certificateUrl");
     expect(app).toContain('path={"/member/email-certificate"} component={MemberEmailCertificatePage}');
     expect(memberPages).toContain("export function MemberEmailCertificatePage()");

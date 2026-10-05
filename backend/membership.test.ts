@@ -17,7 +17,7 @@ vi.mock("./storage", () => ({ storagePut }));
 vi.mock("./security/sensitive", () => ({ encryptSensitiveValue, hashSensitiveMatchValue }));
 vi.mock("./email/membershipNotification", () => ({ dispatchMembershipApplicationNotification }));
 vi.mock("./email/memberActivation", () => ({ dispatchMemberActivationEmail }));
-vi.mock("./security/memberAccount", () => ({ createMemberSetupToken }));
+vi.mock("./security/memberAccount", () => ({ createMemberSetupToken, generateMemberPassword: () => "Aasw@TestXk9" }));
 
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
@@ -69,7 +69,7 @@ describe("membership.submit", () => {
     }));
     expect(dispatchMembershipApplicationNotification).toHaveBeenCalledWith(expect.objectContaining({ applicationRef: result.applicationRef, fullName: "Aarti Sharma", district: "Lucknow" }));
     expect(createMemberCertificateEmailToken).toHaveBeenCalledWith(7, "b".repeat(64), expect.any(Date));
-    expect(dispatchMemberActivationEmail).toHaveBeenCalledWith(expect.objectContaining({ email: "aarti@example.com", membershipNo: "AASW-2026-0001", setupUrl: expect.stringContaining("/member/setup-password?token="), certificateUrl: expect.stringContaining("/member/email-certificate?token=") }));
+    expect(dispatchMemberActivationEmail).toHaveBeenCalledWith(expect.objectContaining({ email: "aarti@example.com", membershipNo: "AASW-2026-0001", loginPassword: "Aasw@TestXk9", loginUrl: expect.stringContaining("/member/login"), certificateUrl: expect.stringContaining("/member/email-certificate?token=") }));
     expect(markMembershipApplicationNotification).toHaveBeenCalledWith(result.applicationRef, "sent");
   });
 

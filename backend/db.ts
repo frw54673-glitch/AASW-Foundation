@@ -140,6 +140,9 @@ export type MembershipActivationInput = {
   application: InsertMembershipApplication;
   setupTokenHash: string;
   setupTokenExpiresAt: Date;
+  /** Direct-login automation: bcrypt hash of the password emailed to the new
+   * member, so they can sign in immediately without a setup link. */
+  passwordHash: string;
   renewalIntent?: boolean;
 };
 
@@ -210,6 +213,11 @@ export async function createMembershipApplicationWithActivation(input: Membershi
           city: input.application.city,
           state: input.application.state,
           district: input.application.district,
+          // The welcome email delivers this password to the member, so they
+          // can sign in straight away; the portal's Change password page
+          // lets them replace it after the first sign-in.
+          passwordHash: input.passwordHash,
+          mustChangePassword: false,
           joiningDate: new Date(),
         });
         const memberId = Number(created[0].insertId);

@@ -12,23 +12,28 @@ describe("member activation security", () => {
     expect(setup.expiresAt.getTime() - now.getTime()).toBe(MEMBER_SETUP_TOKEN_TTL_MS);
   });
 
-  it("sends an approval email with Membership ID, secure setup and certificate links without a plaintext password", () => {
-    const message = createMemberActivationEmail({ fullName: "Asha Kumar", email: "asha@example.org", membershipNo: "AASW-2026-0001", setupUrl: "https://example.org/member/setup-password?token=opaque-token", certificateUrl: "https://example.org/member/email-certificate?token=certificate-token" });
-    expect(message.subject).toContain("Membership Is Approved");
+  it("sends a welcome email with Membership ID, direct password and login steps", () => {
+    const message = createMemberActivationEmail({ fullName: "Asha Kumar", email: "asha@example.org", membershipNo: "AASW-2026-0001", loginPassword: "Aasw@Xk7pQm2R", loginUrl: "https://example.org/member/login", certificateUrl: "https://example.org/member/email-certificate?token=certificate-token" });
+    expect(message.subject).toContain("Welcome to AASW Foundation");
+    expect(message.subject).toContain("Member Login Details");
+    expect(message.text).toContain("Congratulations");
     expect(message.text).toContain("AASW-2026-0001");
-    expect(message.text).toContain("membership is approved");
-    expect(message.text).toContain("72 hours");
-    expect(message.text).toContain("opaque-token");
+    expect(message.text).toContain("Password: Aasw@Xk7pQm2R");
+    expect(message.text).toContain("How to log in — 3 easy steps");
+    expect(message.text).toContain("https://example.org/member/login");
     expect(message.text).toContain("certificate-token");
-    expect(message.text).toContain("Member Portal");
+    expect(message.text).toContain("changing this password after your first sign-in");
     expect(message.text).toContain("https://www.instagram.com/aaswfoundation");
     expect(message.text).toContain("https://www.linkedin.com/company/108100135/");
     expect(message.html).toContain("aasw-foundation-official-logo_41a4007d.png");
+    expect(message.html).toContain("Congratulations, Asha Kumar");
+    expect(message.html).toContain("Aasw@Xk7pQm2R");
+    expect(message.html).toContain("How to log in — 3 easy steps");
+    expect(message.html).toContain("Go to Member Portal");
     expect(message.html).toContain("Stay connected:");
     expect(message.html).toContain("Facebook");
     expect(message.html).toContain("Instagram");
     expect(message.html).toContain("LinkedIn");
-    expect(message.text).not.toMatch(/temporary password|your password is/i);
   });
 
   it("creates a one-time password reset email that preserves the existing password until reset", () => {
