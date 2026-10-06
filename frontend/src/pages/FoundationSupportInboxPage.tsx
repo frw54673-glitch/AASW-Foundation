@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2, ClipboardList, LifeBuoy, LockKeyhole, RefreshCw, Send, ShieldAlert, Users } from "lucide-react";
+import { CheckCircle2, ClipboardList, FileImage, LifeBuoy, LockKeyhole, RefreshCw, Send, ShieldAlert, Users } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 
@@ -11,7 +11,7 @@ const menu = [
   { icon: ClipboardList, label: "Foundation workspace", path: "/foundation-admin" },
   { icon: Users, label: "Member accounts", path: "/foundation-admin/members" },
   { icon: CheckCircle2, label: "Programme requests", path: "/foundation-admin/service-requests" },
-  { icon: LifeBuoy, label: "Support inbox", path: "/foundation-admin/support-inbox" },
+  { icon: LifeBuoy, label: "Support inbox", path: "/foundation-admin/support-inbox" }, { icon: FileImage, label: "Member documents", path: "/foundation-admin/documents" },
 ];
 const statuses = ["submitted", "reviewing", "responded", "closed"] as const;
 const words = (value: string) => value.replaceAll("_", " ");

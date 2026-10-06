@@ -8,7 +8,7 @@ import { notifyError, notifyInfo, notifySuccess } from "@/lib/notifications";
 import { AnimatedCounter } from "@/components/TrustAndImpact";
 import "./foundation-admin.css";
 
-const adminMenu = [{ icon: BarChart3, label: "Foundation workspace", path: "/foundation-admin" }, { icon: Users, label: "Member accounts", path: "/foundation-admin/members" }, { icon: CheckCircle2, label: "Programme requests", path: "/foundation-admin/service-requests" }, { icon: LifeBuoy, label: "Support inbox", path: "/foundation-admin/support-inbox" }, { icon: Users, label: "Public website", path: "/" }];
+const adminMenu = [{ icon: BarChart3, label: "Foundation workspace", path: "/foundation-admin" }, { icon: Users, label: "Member accounts", path: "/foundation-admin/members" }, { icon: CheckCircle2, label: "Programme requests", path: "/foundation-admin/service-requests" }, { icon: LifeBuoy, label: "Support inbox", path: "/foundation-admin/support-inbox" }, { icon: FileImage, label: "Member documents", path: "/foundation-admin/documents" }, { icon: Users, label: "Public website", path: "/" }];
 const memberStatuses = ["submitted", "reviewing", "approved", "declined"] as const;
 const inquiryStatuses = ["submitted", "reviewing", "responded", "closed"] as const;
 const donationStatuses = ["details_submitted", "checkout_created", "verified", "captured", "failed", "closed"] as const;

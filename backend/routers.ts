@@ -20,6 +20,7 @@ import { operationsRouter } from "./routers/operations";
 import { governanceRouter } from "./routers/governance";
 import { dashboardRouter } from "./routers/dashboard";
 import { memberRouter } from "./routers/member";
+import { documentsRouter } from "./routers/documents";
 
 const OWNER_SESSION_MS = 12 * 60 * 60 * 1000;
 
@@ -68,6 +69,7 @@ export const appRouter = router({
   governance: governanceRouter,
   dashboard: dashboardRouter,
   member: memberRouter,
+  documents: documentsRouter,
   assistant: assistantRouter,
 
   // TODO: add feature routers here, e.g.

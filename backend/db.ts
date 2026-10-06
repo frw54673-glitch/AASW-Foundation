@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNull, like, max, or, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, like, max, or, sql, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { accountSetupTokens, foundationAdminAlerts, InsertContactInquiry, InsertDonationIntent, InsertGalleryMedia, InsertMembershipApplication, InsertNewsletterSubscriber, InsertPaymentTransaction, InsertProject, InsertUser, InsertVolunteerApplication, beneficiaries, contactInquiries, donationIntents, fieldEvents, fundersPartners, galleryDriveSync, galleryMedia, impactEvidence, memberCertificateEmailTokens, memberExpiryReminders, memberMembershipCycles, memberPasswordResetTokens, newsletterSubscribers, memberProjectAssignments, memberServiceCompletionProofs, memberServiceCompletions, memberServiceRequests, memberSupportMessages, members, membershipApplications, membershipExpiryAutomation, membershipReminderAutomation, misAuditLogs, monitoringIndicators, paymentRefunds, paymentTransactions, paymentWebhookEvents, projectActivities, projectBudgetAllocations, projectClosures, projectDocuments, projectFinanceRecords, projectObjectives, projectOutcomes, projectOutputs, projectReports, projectRisks, projectTargetGroups, projectTeamAssignments, projects, targetsAchievement, users, volunteerApplications } from "./drizzle/schema";
 import { ENV } from './_core/env';
@@ -1123,6 +1123,27 @@ export async function getMembershipApplicationProofKey(applicationRef: string) {
   if (!db) throw new Error("Database is unavailable for Foundation management.");
   const rows = await db.select({ idProofStorageKey: membershipApplications.idProofStorageKey }).from(membershipApplications).where(eq(membershipApplications.applicationRef, applicationRef)).limit(1);
   return rows[0]?.idProofStorageKey;
+}
+
+/** Member documents workspace: every uploaded file the Foundation can review,
+ * listed newest first. Membership ID proofs and completion report proofs are
+ * returned as two separate groups for the admin documents page. */
+export async function listMemberDocumentRecords() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  const membershipDocs = await db.select({ kind: sql<string>`'membership_proof'`.as("kind"), ref: membershipApplications.applicationRef, memberName: membershipApplications.fullName, membershipNo: sql<string | null>`NULL`.as("membershipNo"), email: membershipApplications.email, fileName: membershipApplications.idProofOriginalName, mimeType: membershipApplications.idProofMimeType, storageKey: membershipApplications.idProofStorageKey, uploadedAt: membershipApplications.createdAt }).from(membershipApplications).orderBy(desc(membershipApplications.createdAt));
+  const completionDocs = await db.select({ kind: sql<string>`'completion_proof'`.as("kind"), ref: memberServiceCompletions.completionRef, memberName: members.fullName, membershipNo: members.membershipNo, email: members.email, fileName: memberServiceCompletionProofs.originalName, mimeType: memberServiceCompletionProofs.mimeType, storageKey: memberServiceCompletionProofs.storageKey, uploadedAt: memberServiceCompletionProofs.createdAt }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).innerJoin(members, eq(memberServiceCompletions.memberId, members.id)).orderBy(desc(memberServiceCompletionProofs.createdAt));
+  return { membershipDocs, completionDocs };
+}
+
+/** Resolve a completion-proof storage key from its completion reference — the
+ * documents view endpoint only trusts keys looked up from the database, never
+ * keys supplied directly by the client. */
+export async function getCompletionProofByRef(completionRef: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  const rows = await db.select({ storageKey: memberServiceCompletionProofs.storageKey, mimeType: memberServiceCompletionProofs.mimeType, originalName: memberServiceCompletionProofs.originalName }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).where(eq(memberServiceCompletions.completionRef, completionRef)).limit(1);
+  return rows[0];
 }
 
 export async function listContactInquiries(limit: number) {

@@ -35,6 +35,7 @@ const FaqPage = lazy(() => import("./pages/MediaContactPages").then(module => ({
 const MediaCentrePage = lazy(() => import("./pages/MediaContactPages").then(module => ({ default: module.MediaCentrePage })));
 const FoundationAdminPage = lazy(() => import("./pages/FoundationAdminPage").then(module => ({ default: module.FoundationAdminPage })));
 const FoundationAdminLoginPage = lazy(() => import("./pages/FoundationAdminLoginPage").then(module => ({ default: module.FoundationAdminLoginPage })));
+const FoundationDocumentsPage = lazy(() => import("./pages/FoundationDocumentsPage").then(module => ({ default: module.FoundationDocumentsPage })));
 const FoundationServiceRequestsPage = lazy(() => import("./pages/FoundationServiceRequestsPage").then(module => ({ default: module.FoundationServiceRequestsPage })));
 const FoundationSupportInboxPage = lazy(() => import("./pages/FoundationSupportInboxPage").then(module => ({ default: module.FoundationSupportInboxPage })));
 const MisProjectsPage = lazy(() => import("./pages/MisProjectsPage").then(module => ({ default: module.MisProjectsPage })));
@@ -169,6 +170,7 @@ function Router() {
       <Route path={"/member/password"} component={MemberSidebarDashboard} />
       <Route path={"/member/email-certificate"} component={MemberEmailCertificatePage} />
       <Route path={"/member/certificate"} component={MemberCertificatePage} />
+      <Route path={"/foundation-admin/documents"} component={FoundationDocumentsPage} />
       <Route path={"/foundation-admin/login"} component={FoundationAdminLoginPage} />
       <Route path={"/foundation-admin"} component={FoundationAdminPage} />
       <Route path={"/foundation-admin/members"} component={MemberAdminPage} />
