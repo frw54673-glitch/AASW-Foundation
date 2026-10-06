@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { AASW_LOGO_CID, aaswLogoAttachment } from "./logo";
 
 type MemberActivationInput = {
   fullName: string;
@@ -32,13 +33,9 @@ const FOUNDATION_SOCIAL_LINKS = {
   linkedin: "https://www.linkedin.com/company/108100135/",
 } as const;
 
-function officialLogoUrl(actionUrl: string) {
-  try {
-    return new URL("/manus-storage/aasw-foundation-official-logo_41a4007d.png", new URL(actionUrl).origin).toString();
-  } catch {
-    return "/manus-storage/aasw-foundation-official-logo_41a4007d.png";
-  }
-}
+/** The logo is embedded into the message itself (cid:), not loaded from a
+ * URL — recipients' mail clients can never reach the app origin. */
+const logoSrc = `cid:${AASW_LOGO_CID}`;
 
 function smtpConfig() {
   const host = process.env.SMTP_HOST;
@@ -52,11 +49,13 @@ function smtpConfig() {
 async function deliverWithFoundationGmail(mail: { to: string; subject: string; text: string; html: string }) {
   const smtp = smtpConfig();
   const transport = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
-  return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
+  // The logo travels inside the message as a CID attachment so it renders in
+  // every mail client — never fetched from the app origin.
+  return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, attachments: [aaswLogoAttachment()], ...mail });
 }
 
 export function createMemberActivationEmail(input: MemberActivationInput) {
-  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), loginPassword: escapeHtml(input.loginPassword), loginUrl: escapeHtml(input.loginUrl), certificateUrl: escapeHtml(input.certificateUrl ?? ""), logoUrl: escapeHtml(officialLogoUrl(input.loginUrl)), facebook: FOUNDATION_SOCIAL_LINKS.facebook, instagram: FOUNDATION_SOCIAL_LINKS.instagram, linkedin: FOUNDATION_SOCIAL_LINKS.linkedin };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), loginPassword: escapeHtml(input.loginPassword), loginUrl: escapeHtml(input.loginUrl), certificateUrl: escapeHtml(input.certificateUrl ?? ""), logoUrl: logoSrc, facebook: FOUNDATION_SOCIAL_LINKS.facebook, instagram: FOUNDATION_SOCIAL_LINKS.instagram, linkedin: FOUNDATION_SOCIAL_LINKS.linkedin };
   return {
     subject: "Welcome to AASW Foundation — Your Member Login Details Inside",
     text: `Dear ${input.fullName},\n\nCongratulations! Your AASW Foundation membership is approved and your member account is ready to use right now.\n\nYour login details:\nMembership ID: ${input.membershipNo}\nPassword: ${input.loginPassword}\n\nHow to log in — 3 easy steps:\n1. Open the Member Portal: ${input.loginUrl}\n2. Enter your Membership ID (${input.membershipNo}) or this email address\n3. Enter the password exactly as shown above\n\nDownload your membership certificate within 72 hours: ${input.certificateUrl}\n\nYour certificate stays available anytime inside the Member Portal. For your security, we recommend changing this password after your first sign-in (Member Portal → Change password). Please do not forward this email or share your login details with anyone. If you did not submit this membership application, please contact AASW Foundation immediately.\n\nConnect with AASW Foundation:\nFacebook: ${FOUNDATION_SOCIAL_LINKS.facebook}\nInstagram: ${FOUNDATION_SOCIAL_LINKS.instagram}\nLinkedIn: ${FOUNDATION_SOCIAL_LINKS.linkedin}\n\nAASW Foundation\nRura, Kanpur Dehat, Uttar Pradesh 209303\nDo not reply to this email.`,
@@ -80,7 +79,7 @@ export async function dispatchMemberActivationEmail(input: MemberActivationInput
 
 export function createMemberExpiryReminderEmail(input: { fullName: string; email: string; membershipNo: string; expiresOn: Date; portalUrl: string }) {
   const expiry = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(input.expiresOn);
-  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: escapeHtml(officialLogoUrl(input.portalUrl)) };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: logoSrc };
   return {
     subject: "AASW Foundation — Your Membership Expires in 7 Days",
     text: `Dear ${input.fullName},\n\nThis is a reminder that your AASW Foundation annual membership (${input.membershipNo}) is valid through ${expiry} and will expire in 7 days.\n\nTo continue with the same Member ID, password, profile, projects and activity history, submit a new membership application with the same email address and PAN after expiry.\n\nOpen Member Portal: ${input.portalUrl}\n\nAASW Foundation\nThis is an automated membership reminder; please do not reply to this email.`,
@@ -104,7 +103,7 @@ export async function dispatchMemberExpiryReminderEmail(input: { fullName: strin
 
 export function createMemberPostGraceFollowUpEmail(input: { fullName: string; email: string; membershipNo: string; expiresOn: Date; portalUrl: string }) {
   const expiry = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(input.expiresOn);
-  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: escapeHtml(officialLogoUrl(input.portalUrl)) };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: logoSrc };
   return {
     subject: "AASW Foundation — Renew Your Membership to Restore Portal Access",
     text: `Dear ${input.fullName},\n\nYour AASW Foundation annual membership (${input.membershipNo}) ended on ${expiry}, and the three-day renewal grace period has now concluded.\n\nTo restore Member Portal access while keeping the same Member ID, password, profile, projects and activity history, submit a new membership application with the same email address and PAN.\n\nOpen Member Portal: ${input.portalUrl}\n\nAASW Foundation\nThis is an automated membership follow-up; please do not reply to this email.`,

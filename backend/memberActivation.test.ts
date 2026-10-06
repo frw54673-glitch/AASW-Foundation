@@ -25,7 +25,7 @@ describe("member activation security", () => {
     expect(message.text).toContain("changing this password after your first sign-in");
     expect(message.text).toContain("https://www.instagram.com/aaswfoundation");
     expect(message.text).toContain("https://www.linkedin.com/company/108100135/");
-    expect(message.html).toContain("aasw-foundation-official-logo_41a4007d.png");
+    expect(message.html).toContain("cid:aasw-foundation-logo");
     expect(message.html).toContain("Congratulations, Asha Kumar");
     expect(message.html).toContain("Aasw@Xk7pQm2R");
     expect(message.html).toContain("How to log in — 3 easy steps");
