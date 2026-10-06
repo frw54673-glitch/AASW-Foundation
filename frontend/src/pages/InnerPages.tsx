@@ -39,6 +39,7 @@ const officialTeamPortraits = {
   anuj: "/manus-storage/anuj_b7d41d43.jpeg",
   anupamShahi: "/manus-storage/anupam-shahi_1e632ba9.jpeg",
   kshamaRani: "/manus-storage/kshama-rani.jpg",
+  sikhaNayak: "/manus-storage/sikha-nayak.jpg",
   trainerOne: "/manus-storage/trainer-1_5b332362.webp",
   trainerTwo: "/manus-storage/trainer-2_fcbe185e.webp",
   trainerThree: "/manus-storage/trainer-3_1facb098.webp",
@@ -94,6 +95,7 @@ const teamData = [
   ...centralAdvisoryGallery.map((member) => ({ name: member.name, category: member.designation, group: "advisory" as const, image: member.image, portraitMode: "face-safe" as const })),
   ...digitalTrainerGallery.map((member) => ({ name: member.name, category: member.designation, group: "trainers" as const, image: member.image, portraitMode: "face-safe" as const })),
   { name: "Kshama Rani", category: "Program Manager", group: "program" as const, image: officialTeamPortraits.kshamaRani, portraitMode: "face-safe" as const, bio: "Leads the Foundation's programme delivery across Uttar Pradesh — coordinating digital training cohorts, green enterprise initiatives and community field events end to end." },
+  { name: "Sikha Nayak", category: "State Head - Odisha", group: "program" as const, image: officialTeamPortraits.sikhaNayak, portraitMode: "face-safe" as const, bio: "State Head for Odisha — coordinating AASW programmes, field partnerships and member support across the state, working closely with the central programme team." },
 ];
 
 const stateCouncilGallery = stateCouncilMembers.map((name) => ({ name, category: "State Council Member", group: "state" as const, hasSourcePortrait: false }));
