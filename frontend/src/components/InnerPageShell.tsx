@@ -16,10 +16,13 @@ type InnerPageShellProps = {
   chapter: string;
   heroImage?: string;
   heroAlt?: string;
+  /** Show the hero image at its natural full height instead of the cropped
+   * 400px frame — used for poster-style visuals that must not be cut off. */
+  heroImageNatural?: boolean;
   tone?: "paper" | "sand" | "ink";
 };
 
-export function InnerPageShell({ children, activePath, eyebrow, title, intro, chapter, heroImage, heroAlt, tone = "paper" }: InnerPageShellProps) {
+export function InnerPageShell({ children, activePath, eyebrow, title, intro, chapter, heroImage, heroAlt, heroImageNatural = false, tone = "paper" }: InnerPageShellProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [headerScrolled, setHeaderScrolled] = useState(false);
   const closeMenu = () => setMenuOpen(false);
@@ -78,7 +81,7 @@ export function InnerPageShell({ children, activePath, eyebrow, title, intro, ch
               <h1>{title}</h1>
               <p className="inner-hero-intro">{intro}</p>
             </div>
-            {heroImage ? <div className="inner-hero-image" data-reveal="right" data-reveal-delay="1"><img src={heroImage} alt={heroAlt ?? "AASW Foundation editorial visual"} /><span className="image-source-label">Source archive visual</span></div> : <div className="inner-hero-symbol" data-reveal="right" data-reveal-delay="1"><img src="/manus-storage/aasw-foundation-official-logo_41a4007d.png" alt="" /><span>Field notes<br /><strong>from AASW</strong></span></div>}
+            {heroImage ? <div className={`inner-hero-image${heroImageNatural ? " inner-hero-image-natural" : ""}`} data-reveal="right" data-reveal-delay="1"><img src={heroImage} alt={heroAlt ?? "AASW Foundation editorial visual"} /><span className="image-source-label">Source archive visual</span></div> : <div className="inner-hero-symbol" data-reveal="right" data-reveal-delay="1"><img src="/manus-storage/aasw-foundation-official-logo_41a4007d.png" alt="" /><span>Field notes<br /><strong>from AASW</strong></span></div>}
             </div>
           </div>
         </section>
