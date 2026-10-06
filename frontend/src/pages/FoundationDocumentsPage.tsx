@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CheckCircle2, ClipboardList, FileImage, FileText, LifeBuoy, Loader2, LockKeyhole, RefreshCw, ShieldAlert, Users } from "lucide-react";
+import { useRef, useState } from "react";
+import { CheckCircle2, ClipboardList, Download, FileImage, FileText, LifeBuoy, Loader2, LockKeyhole, RefreshCw, ShieldAlert, Users, X } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -29,26 +29,19 @@ type DocumentRecord = { kind: string; ref: string; memberName: string; membershi
 function DocumentsWorkspace() {
   const documents = trpc.documents.list.useQuery();
   const [viewingRef, setViewingRef] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ url: string; record: DocumentRecord } | null>(null);
+  // The record clicked is kept in a ref so the mutation's onSuccess always
+  // reads the current one without stale-closure risk.
+  const pendingRecord = useRef<DocumentRecord | null>(null);
   const view = trpc.documents.view.useMutation({
-    onSuccess: async result => {
-      try {
-        // Local development inlines stored files as data: URLs — browsers block
-        // top-level data navigation, so convert to a blob URL first. Production
-        // signed URLs (https) open directly in a new tab.
-        if (result.url.startsWith("data:")) {
-          const blob = await (await fetch(result.url)).blob();
-          window.location.assign(URL.createObjectURL(blob));
-        } else {
-          window.open(result.url, "_blank", "noopener");
-        }
-      } catch {
-        notifyError("The document could not be opened. Please try again.");
-      }
+    onSuccess: result => {
+      const record = pendingRecord.current;
+      if (record) setViewer({ url: result.url, record });
       setViewingRef(null);
     },
     onError: issue => { notifyError(issue.message); setViewingRef(null); },
   });
-  const openDocument = (record: DocumentRecord) => { setViewingRef(record.ref); view.mutate({ kind: record.kind as "membership_proof" | "completion_proof", ref: record.ref }); };
+  const openDocument = (record: DocumentRecord) => { pendingRecord.current = record; setViewingRef(record.ref); view.mutate({ kind: record.kind as "membership_proof" | "completion_proof", ref: record.ref }); };
   const refresh = () => documents.refetch();
 
   const renderRow = (record: DocumentRecord, badge: string, badgeClass: string) => (
@@ -107,6 +100,26 @@ function DocumentsWorkspace() {
           </div>
         </section>
       </>}
+      {viewer && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#291d1d]/60 p-4" role="presentation" onMouseDown={() => setViewer(null)}>
+          <section className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[#291d1d]/20 bg-[#fffdf7] shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title" onMouseDown={event => event.stopPropagation()}>
+            <header className="flex items-center justify-between gap-3 bg-[#174c3c] px-5 py-4 text-[#fffdf7]">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[#eac06e]">Member document</p>
+                <h2 id="document-viewer-title" className="font-serif text-xl">{viewer.record.fileName}</h2>
+              </div>
+              <button type="button" onClick={() => setViewer(null)} aria-label="Close document viewer" className="rounded p-1 text-[#fffdf7] hover:bg-[#ffffff]/10"><X size={18} /></button>
+            </header>
+            <div className="min-h-[240px] flex-1 overflow-auto bg-white p-4">
+              {viewer.record.mimeType.startsWith("image/") ? <img src={viewer.url} alt={viewer.record.fileName} className="mx-auto max-h-[58vh] w-auto max-w-full object-contain" /> : viewer.record.mimeType === "application/pdf" ? <iframe src={viewer.url} title={viewer.record.fileName} className="h-[58vh] w-full border-0" /> : <p className="p-6 text-center text-sm text-[#796966]">Preview is not available for this file type — use the download button below.</p>}
+            </div>
+            <footer className="flex flex-col justify-between gap-2 border-t border-[#291d1d]/10 px-5 py-3 text-xs text-[#796966] sm:flex-row sm:items-center">
+              <span>{viewer.record.memberName}{viewer.record.membershipNo ? ` · ${viewer.record.membershipNo}` : ""} · {viewer.record.ref}</span>
+              <a href={viewer.url} download={viewer.record.fileName} className="inline-flex items-center gap-2 border border-[#2f6b52] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[#2f6b52] transition hover:bg-[#2f6b52] hover:text-white"><Download size={13} />Download</a>
+            </footer>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
