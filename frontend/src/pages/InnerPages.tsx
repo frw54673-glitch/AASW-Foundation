@@ -16,7 +16,7 @@ const teamArchive = "/manus-storage/source-aasw-2_ed3d3d5d.webp";
 const governanceArchive = "/manus-storage/governance-ngo-management-cover.png";
 const updatesArchive = "/manus-storage/source-digital-divide-women_8956082d.webp";
 const membershipArchive = "/manus-storage/source-digital-divide-women_8956082d.webp";
-const donateArchive = "/manus-storage/aasw-program-workshop_4e66aa72.jpg";
+const donateArchive = "/manus-storage/donate-now-banner.png";
 const reportDocument = "/manus-storage/source-certificate-template_567a7fbc.webp";
 
 // Downloaded unchanged from the official AASW Team page on 18 August 2026.
@@ -296,7 +296,7 @@ export function DonatePage() {
     { label: "03 / Mentorship & community", title: "Back mentorship and community.", copy: "Support shared learning, workshops and professional mentorship for women building businesses.", amount: 8000 },
   ];
   return (
-    <InnerPageShell activePath="/donate" chapter="10 / SUPPORT" eyebrow="Donate to AASW" title={<>Support a woman.<br /><em>Change a community.</em></>} intro="Every contribution helps extend AASW’s reach into new districts and regions through digital literacy, micro-enterprise tools and sustainable livelihood programmes." heroImage={donateArchive} heroAlt="AASW source archive visual from a digital learning programme">
+    <InnerPageShell activePath="/donate" chapter="10 / SUPPORT" eyebrow="Donate to AASW" title={<>Support a woman.<br /><em>Change a community.</em></>} intro="Every contribution helps extend AASW’s reach into new districts and regions through digital literacy, micro-enterprise tools and sustainable livelihood programmes." heroImage={donateArchive} heroImageNatural heroAlt="Donate Now — your support can change lives banner with AASW Foundation members and children">
       <InnerSection className="donate-inner-intro"><SectionHeading kicker="Donate to AASW" title={<>How your donation<br /><em>helps.</em></>} copy="Donation is a separate support flow from Membership. Complete the required donor details and select the amount you would like to give." /></InnerSection>
       <InnerSection id="donation-details" className="donation-details-section"><DonationDetailsForm /><TaxInlineNote /></InnerSection>
       <InnerSection className="donation-tax-section"><TaxBenefitBlock /></InnerSection>
