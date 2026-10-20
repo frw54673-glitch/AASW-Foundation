@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { HttpError } from "@shared/_core/errors";
+import { HttpError } from "../../shared/_core/errors";
 import { expireDueMemberships, getMembershipExpiryAutomationByTaskUid, recordMembershipExpiryAutomationRun } from "../db";
 import { sdk } from "../_core/sdk";
 

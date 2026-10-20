@@ -3,7 +3,7 @@ import type { User } from "../drizzle/schema";
 import { authenticateMemberRequest, MEMBER_SESSION_COOKIE, type AuthenticatedMember } from "../security/memberSession";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME } from "../../shared/const";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];

@@ -7,7 +7,7 @@ import { getSessionCookieOptions } from "../_core/cookies";
 import { adminProcedure, memberProcedure, publicProcedure, router } from "../_core/trpc";
 import { createMemberSetupToken, hashMemberSetupToken } from "../security/memberAccount";
 import { createMemberSession, MEMBER_SESSION_COOKIE } from "../security/memberSession";
-import { getMembershipValidity } from "@shared/memberMembership";
+import { getMembershipValidity } from "../../shared/memberMembership";
 import { storageGetSignedUrl, isLocalUploadMode, storageLocalUploadDataUrl, storagePut } from "../storage";
 import { nanoid } from "nanoid";
 

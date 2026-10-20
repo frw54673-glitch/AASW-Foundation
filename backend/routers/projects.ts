@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { UN_SDG_GOALS, suggestProjectCode } from "@shared/mis";
+import { UN_SDG_GOALS, suggestProjectCode } from "../../shared/mis";
 import { createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects, assignProjectToAllActiveMembers } from "../db";
 import { misProjectReadProcedure, misProjectWriteProcedure, router } from "../_core/trpc";
 

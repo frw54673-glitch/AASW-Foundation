@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { HttpError } from "@shared/_core/errors";
+import { HttpError } from "../../shared/_core/errors";
 import { claimPostGraceRenewalFollowUpCandidates, claimSevenDayExpiryReminderCandidates, getMembershipReminderAutomationByTaskUid, markMembershipExpiryReminder, recordMembershipReminderAutomationRun } from "../db";
 import { dispatchMemberExpiryReminderEmail, dispatchMemberPostGraceFollowUpEmail } from "../email/memberActivation";
 import { sdk } from "../_core/sdk";

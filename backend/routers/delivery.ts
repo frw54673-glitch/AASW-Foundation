@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { createBeneficiaryId, createFieldEventId } from "@shared/mis";
+import { createBeneficiaryId, createFieldEventId } from "../../shared/mis";
 import { createMisBeneficiary, createMisFieldEvent, createMisOutcome, createMisOutput, createMisTargetAchievement, findDuplicateBeneficiary, getMisDeliverySummary, getNextBeneficiarySequence, getNextFieldEventSequence, listMisBeneficiaries } from "../db";
 import { misFieldProcedure, misMonitoringProcedure, misProjectReadProcedure, router } from "../_core/trpc";
 

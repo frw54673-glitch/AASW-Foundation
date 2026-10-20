@@ -2,7 +2,7 @@ import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { invokeLLM, type Message as LlmMessage } from "../_core/llm";
 import { ENV } from "../_core/env";
-import { AASW_CONTACT } from "@shared/organisationContact";
+import { AASW_CONTACT } from "../../shared/organisationContact";
 
 // The public site assistant answers general questions about the Foundation.
 // Two answering paths, in order of preference:

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reportingAlert } from "@shared/mis";
+import { reportingAlert } from "../../shared/mis";
 import { createMisBudgetAllocation, createMisDocument, createMisFinanceRecord, createMisMonitoringIndicator, createMisReport, createMisRisk, createMisTeamAssignment, listMisReports, listMisRisks, updateMisFinanceApproval } from "../db";
 import { misFinanceProcedure, misMonitoringProcedure, misOperationsProcedure, misProjectReadProcedure, misProjectWriteProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";

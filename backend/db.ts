@@ -2,8 +2,8 @@ import { and, asc, count, desc, eq, gt, inArray, isNull, like, max, or, sql, sum
 import { drizzle } from "drizzle-orm/mysql2";
 import { accountSetupTokens, foundationAdminAlerts, InsertContactInquiry, InsertDonationIntent, InsertGalleryMedia, InsertMembershipApplication, InsertNewsletterSubscriber, InsertPaymentTransaction, InsertProject, InsertUser, InsertVolunteerApplication, beneficiaries, contactInquiries, donationIntents, fieldEvents, fundersPartners, galleryDriveSync, galleryMedia, impactEvidence, memberCertificateEmailTokens, memberExpiryReminders, memberMembershipCycles, memberPasswordResetTokens, newsletterSubscribers, memberProjectAssignments, memberServiceCompletionProofs, memberServiceCompletions, memberServiceRequests, memberSupportMessages, members, membershipApplications, membershipExpiryAutomation, membershipReminderAutomation, misAuditLogs, monitoringIndicators, paymentRefunds, paymentTransactions, paymentWebhookEvents, projectActivities, projectBudgetAllocations, projectClosures, projectDocuments, projectFinanceRecords, projectObjectives, projectOutcomes, projectOutputs, projectReports, projectRisks, projectTargetGroups, projectTeamAssignments, projects, targetsAchievement, users, volunteerApplications } from "./drizzle/schema";
 import { ENV } from './_core/env';
-import { decideGalleryDriveImport } from "@shared/galleryDrive";
-import { getMembershipValidity } from "@shared/memberMembership";
+import { decideGalleryDriveImport } from "../shared/galleryDrive";
+import { getMembershipValidity } from "../shared/memberMembership";
 import { decryptSensitiveValue, hashSensitiveMatchValue } from "./security/sensitive";
 
 let _db: ReturnType<typeof drizzle> | null = null;
