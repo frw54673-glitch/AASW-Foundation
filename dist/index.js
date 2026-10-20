@@ -5486,7 +5486,10 @@ function createApiApp() {
   app.use(compression());
   app.use(applyHttpSecurity);
   app.use((req, _res, next) => {
-    if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
+    const matchedPath = req.headers["x-matched-path"];
+    if (matchedPath && matchedPath.startsWith("/api")) {
+      req.url = matchedPath;
+    } else if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
       req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
     }
     next();

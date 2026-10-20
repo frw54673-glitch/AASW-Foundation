@@ -25,9 +25,12 @@ export function createApiApp() {
   app.use(compression());
   app.use(applyHttpSecurity);
 
-  // Normalize URL for serverless environments (e.g. Vercel) where the /api prefix may be stripped
+  // Normalize URL for serverless environments (e.g. Vercel) where rewrites or proxying may adjust paths
   app.use((req, _res, next) => {
-    if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
+    const matchedPath = req.headers["x-matched-path"] as string | undefined;
+    if (matchedPath && matchedPath.startsWith("/api")) {
+      req.url = matchedPath;
+    } else if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
       req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
     }
     next();
