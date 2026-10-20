@@ -294,6 +294,28 @@ class SDKServer {
 
     const sessionUserId = session.openId;
     const signedInAt = new Date();
+
+    if (sessionUserId === "foundation-owner" || session.appId === "foundation-owner") {
+      let ownerUser: User | null | undefined = null;
+      try {
+        ownerUser = await db.getUserByOpenId(sessionUserId);
+      } catch {
+        // DB not available
+      }
+      return (ownerUser ?? {
+        id: 1,
+        openId: "foundation-owner",
+        name: session.name || "AASW Foundation",
+        email: "aaswfoundation06@gmail.com",
+        role: "admin",
+        loginMethod: "owner-login",
+        passwordHash: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastSignedIn: signedInAt,
+      }) as AuthenticatedUser;
+    }
+
     let user = await db.getUserByOpenId(sessionUserId);
 
     // If user not in DB, sync from OAuth server automatically
