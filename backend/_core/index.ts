@@ -4,10 +4,30 @@ import net from "net";
 import { createApiApp } from "./app";
 import { serveStatic, setupVite } from "./vite";
 
+function isMysqlListening(port = 3306, host = "127.0.0.1"): Promise<boolean> {
+  return new Promise(resolve => {
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, host);
+  });
+}
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();
-    server.listen(port, () => server.close(() => resolve(true)));
+    server.listen({ port, host: "0.0.0.0" }, () => server.close(() => resolve(true)));
     server.on("error", () => resolve(false));
   });
 }
@@ -20,7 +40,7 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 }
 
 async function ensureDatabaseRunning() {
-  if (!(await isPortAvailable(3306))) {
+  if (await isMysqlListening(3306)) {
     console.log("[AutoDB] Local MySQL is active on 127.0.0.1:3306.");
     return;
   }
@@ -29,25 +49,55 @@ async function ensureDatabaseRunning() {
   try {
     const { spawn } = await import("child_process");
     const path = await import("path");
-    const scriptPath = path.resolve(process.cwd(), "scripts/runPersistentDb.ts");
-    const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-    const useShell = process.platform === "win32";
-    const dbProc = spawn(
-      useShell ? `"${pnpmCmd}"` : pnpmCmd,
-      useShell ? ["exec", "tsx", `"${scriptPath}"`] : ["exec", "tsx", scriptPath],
-      { cwd: process.cwd(), detached: true, stdio: "ignore", windowsHide: true, shell: useShell },
-    );
-    dbProc.on("error", error => console.error("[AutoDB] Persistent database process could not start:", error));
-    dbProc.unref();
+    const fs = await import("fs");
 
-    for (let i = 0; i < 40; i++) {
+    const storeRoot = path.resolve(process.cwd(), ".local-mysql");
+    const binary = path.join(storeRoot, "binaries", "9.7.2", "mysql", "bin", process.platform === "win32" ? "mysqld.exe" : "mysqld");
+    const dataDir = path.join(storeRoot, "data");
+    const initFile = path.join(storeRoot, "init.sql");
+
+    if (fs.existsSync(binary) && fs.existsSync(dataDir)) {
+      const serverArgs = [
+        "--no-defaults",
+        "--port=3306",
+        `--datadir=${dataDir}`,
+        "--bind-address=127.0.0.1",
+        "--default-time-zone=+00:00",
+        "--console",
+      ];
+      if (fs.existsSync(initFile)) {
+        serverArgs.push(`--init-file=${initFile}`);
+      }
+
+      const dbProc = spawn(binary, serverArgs, {
+        cwd: storeRoot,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      dbProc.on("error", error => console.error("[AutoDB] mysqld could not start:", error));
+      dbProc.unref();
+    } else {
+      const scriptPath = path.resolve(process.cwd(), "scripts/runPersistentDb.ts");
+      const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+      const dbProc = spawn(npxCmd, ["tsx", scriptPath], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      dbProc.on("error", error => console.error("[AutoDB] Database bootstrap could not start:", error));
+      dbProc.unref();
+    }
+
+    for (let i = 0; i < 60; i++) {
       await new Promise(resolve => setTimeout(resolve, 500));
-      if (!(await isPortAvailable(3306))) {
+      if (await isMysqlListening(3306)) {
         console.log("[AutoDB] Local MySQL is UP on 127.0.0.1:3306.");
         return;
       }
     }
-    console.warn("[AutoDB] Warning: MySQL did not respond on 3306 within 20s.");
+    console.warn("[AutoDB] Warning: MySQL did not respond on 3306 within 30s.");
   } catch (error) {
     console.error("[AutoDB] Failed to auto-start MySQL:", error);
   }
@@ -58,15 +108,15 @@ async function startServer() {
   const app = createApiApp();
   const server = createServer(app);
 
-  if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-
   const preferredPort = parseInt(process.env.PORT || "3000", 10);
   const port = await findAvailablePort(preferredPort);
   if (port !== preferredPort) console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+
+  if (process.env.NODE_ENV === "development") {
+    await setupVite(app, server, port);
+  } else {
+    serveStatic(app);
+  }
 
   server.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${port}/ (or http://127.0.0.1:${port}/)`);

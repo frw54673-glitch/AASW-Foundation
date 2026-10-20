@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, ChevronDown } from "lucide-react";
-import { ABOUT_MENU_GROUPS } from "../../../shared/aboutMenu";
+import { ABOUT_MENU_GROUPS } from "@shared/aboutMenu";
 import { AASW_CONTACT } from "@shared/organisationContact";
 
-export { ABOUT_MENU_GROUPS } from "../../../shared/aboutMenu";
+export { ABOUT_MENU_GROUPS } from "@shared/aboutMenu";
 
-type AboutMegaMenuProps = {
+export type AboutMegaMenuProps = {
   activePath?: string;
   onNavigate?: () => void;
 };
@@ -51,13 +51,13 @@ export function AboutMobileNav({ onNavigate }: Pick<AboutMegaMenuProps, "onNavig
   return <div className="mobile-about-group"><button type="button" className="mobile-nav-link mobile-about-trigger" aria-expanded={open} onClick={() => setOpen((value) => !value)}><span>About</span><ChevronDown size={17} /></button>{open && <div className="mobile-about-links">{ABOUT_MENU_GROUPS.map((group) => <section key={group.label}><a className="mobile-about-group-title" href={group.href} onClick={onNavigate}>{group.label}<ArrowUpRight size={14} /></a>{group.links.map((link) => <a href={link.href} key={`mobile-${link.label}`} onClick={onNavigate}>{link.label}<ArrowUpRight size={14} /></a>)}</section>)}</div>}</div>;
 }
 
-type HeaderMegaMenuGroup = {
+export type HeaderMegaMenuGroup = {
   label: string;
   href: string;
   links: Array<{ label: string; href: string; note?: string }>;
 };
 
-type HeaderMegaMenuDefinition = {
+export type HeaderMegaMenuDefinition = {
   id: "what-we-do" | "media-centre" | "contact-us";
   label: string;
   overviewHref: string;

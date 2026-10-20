@@ -7,7 +7,7 @@ import { DonationDetailsForm } from "@/components/DonationDetailsForm";
 import { LiveContentAppendix } from "@/components/LiveContentPanels";
 import { TaxBenefitBlock, TaxInlineNote } from "@/components/TrustAndImpact";
 import { AASW_CONTACT } from "@shared/organisationContact";
-import { AASW_ORG_SOCIAL_LINKS, UNPUBLISHED_PROFILE_NOTE } from "../../../shared/teamProfile";
+import { AASW_ORG_SOCIAL_LINKS, UNPUBLISHED_PROFILE_NOTE } from "@shared/teamProfile";
 
 const heroEditorial = "/manus-storage/aasw-hero-editorial_d40219ad.jpg";
 const workshopEditorial = "/manus-storage/aasw-program-workshop_4e66aa72.jpg";

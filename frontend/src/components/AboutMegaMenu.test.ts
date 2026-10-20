@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ABOUT_MENU_GROUPS } from "./AboutMegaMenu";
+import { ABOUT_MENU_GROUPS } from "@shared/aboutMenu";
 
 describe("About mega-menu source routes", () => {
   it("provides the expected institutional navigation groups", () => {

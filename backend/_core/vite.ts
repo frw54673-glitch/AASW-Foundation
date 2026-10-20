@@ -16,10 +16,10 @@ function resolveViteConfig(): InlineConfig {
   return typeof viteConfig === "function" ? (viteConfig as (args: { mode: string }) => InlineConfig)({ mode }) : (viteConfig as InlineConfig);
 }
 
-export async function setupVite(app: Express, server: Server) {
+export async function setupVite(app: Express, server: Server, port?: number) {
   const serverOptions = {
     middlewareMode: true,
-    hmr: { server },
+    hmr: { server, ...(port ? { clientPort: port } : {}) },
     allowedHosts: true as const,
   };
 

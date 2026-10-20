@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects } = vi.hoisted(() => ({ createMisActivity: vi.fn(), createMisFunderPartner: vi.fn(), createMisObjective: vi.fn(), createMisProject: vi.fn(), createMisTargetGroup: vi.fn(), getMisProject: vi.fn(), getNextProjectSequence: vi.fn(), listMisProjects: vi.fn() }));
-vi.mock("./db", () => ({ createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects }));
+const { assignProjectToAllActiveMembers, createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects } = vi.hoisted(() => ({ assignProjectToAllActiveMembers: vi.fn(), createMisActivity: vi.fn(), createMisFunderPartner: vi.fn(), createMisObjective: vi.fn(), createMisProject: vi.fn(), createMisTargetGroup: vi.fn(), getMisProject: vi.fn(), getNextProjectSequence: vi.fn(), listMisProjects: vi.fn() }));
+vi.mock("./db", () => ({ assignProjectToAllActiveMembers, createMisActivity, createMisFunderPartner, createMisObjective, createMisProject, createMisTargetGroup, getMisProject, getNextProjectSequence, listMisProjects }));
 
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
@@ -11,7 +11,7 @@ function context(role: "user" | "admin" | "project_manager" | "field_staff" | nu
 }
 
 describe("MIS Phase 1 project router", () => {
-  beforeEach(() => { vi.resetAllMocks(); getNextProjectSequence.mockResolvedValue(7); createMisProject.mockResolvedValue(42); listMisProjects.mockResolvedValue([]); });
+  beforeEach(() => { vi.resetAllMocks(); assignProjectToAllActiveMembers.mockResolvedValue({ assigned: 0 }); getNextProjectSequence.mockResolvedValue(7); createMisProject.mockResolvedValue(42); listMisProjects.mockResolvedValue([]); });
   it("generates a Project Code server-side and persists the owner identity", async () => {
     const caller = appRouter.createCaller(context("project_manager"));
     await expect(caller.projects.suggestCode()).resolves.toBe("PRJ-2026-007");

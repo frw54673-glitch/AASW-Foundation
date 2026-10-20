@@ -161,24 +161,27 @@ function vitePluginManusDebugCollector(): Plugin {
 function vitePluginAnalyticsPlaceholder(): Plugin {
   return {
     name: "analytics-placeholder",
+    enforce: "pre",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        const endpoint = process.env.VITE_ANALYTICS_ENDPOINT?.trim();
+        const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID?.trim();
 
-    transformIndexHtml(html) {
-      const endpoint = process.env.VITE_ANALYTICS_ENDPOINT?.trim();
-      const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID?.trim();
+        if (endpoint && websiteId) {
+          return html
+            .replaceAll("%VITE_ANALYTICS_ENDPOINT%", endpoint)
+            .replaceAll("%VITE_ANALYTICS_WEBSITE_ID%", websiteId);
+        }
 
-      if (endpoint && websiteId) {
-        return html
-          .replaceAll("%VITE_ANALYTICS_ENDPOINT%", endpoint)
-          .replaceAll("%VITE_ANALYTICS_WEBSITE_ID%", websiteId);
-      }
-
-      // Vite's own html env replacement may already have rewritten the %VARS%
-      // into empty strings before this hook runs, so match both the raw
-      // placeholder form and the substituted-with-empty form.
-      return html.replace(
-        /\s*<script[^>]*src="(?:%VITE_ANALYTICS_ENDPOINT%|)\/umami"[^>]*>\s*<\/script>/g,
-        "",
-      );
+        // Vite's own html env replacement may already have rewritten the %VARS%
+        // into empty strings before this hook runs, so match both the raw
+        // placeholder form and the substituted-with-empty form.
+        return html.replace(
+          /\s*<script[^>]*src="(?:%VITE_ANALYTICS_ENDPOINT%|)\/umami"[^>]*>\s*<\/script>/g,
+          "",
+        );
+      },
     },
   };
 }
@@ -232,6 +235,7 @@ export default defineConfig(({ mode }) => {
     },
   },
   server: {
+    port: 3000,
     host: true,
     allowedHosts: [
       ".manuspre.computer",

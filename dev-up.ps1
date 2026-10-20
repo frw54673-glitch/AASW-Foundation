@@ -51,10 +51,10 @@ else {
 
   # 3. Boot the PERSISTENT database (keeps all member data in .local-mysql/data).
   Write-Host "[dev-up] Booting persistent MySQL (data survives restarts)..." -ForegroundColor Yellow
-  # pnpm is a .cmd shim on Windows; Start-Process needs the .cmd extension.
-  $pnpmCmd = (Get-Command pnpm.cmd -ErrorAction SilentlyContinue).Source
-  if (-not $pnpmCmd) { $pnpmCmd = (Get-Command pnpm -ErrorAction Stop).Source }
-  $dbProc = Start-Process -FilePath $pnpmCmd -ArgumentList "exec", "tsx", "scripts/runPersistentDb.ts" `
+  $dataDir = Join-Path $root ".local-mysql\data"
+  $initSql = Join-Path $root ".local-mysql\init.sql"
+  $dbProc = Start-Process -FilePath $binary `
+    -ArgumentList "--no-defaults", "--port=3306", "--datadir=$dataDir", "--bind-address=127.0.0.1", "--default-time-zone=+00:00", "--init-file=$initSql" `
     -WorkingDirectory $root -WindowStyle Minimized -PassThru
   $dbProc.Id | Out-File (Join-Path $root ".local-mysql\dev-up-db.pid") -Encoding ascii
 
@@ -63,12 +63,23 @@ else {
     Start-Sleep -Seconds 1
   }
   if (-not (Test-DbUp)) {
-    throw "[dev-up] MySQL did not come up on 3306 within 30s. Check .local-mysql\error.err"
+    throw "[dev-up] MySQL did not come up on 3306 within 30s. Check .local-mysql\data"
   }
   Write-Host "[dev-up] MySQL is UP on 127.0.0.1:3306 (persistent data)." -ForegroundColor Green
 }
 
 # 4. Start the app dev server in this window.
-$pnpmCmd = (Get-Command pnpm.cmd -ErrorAction SilentlyContinue).Source
-if (-not $pnpmCmd) { $pnpmCmd = (Get-Command pnpm -ErrorAction Stop).Source }
-& $pnpmCmd dev
+$pkgCmd = (Get-Command pnpm.cmd -ErrorAction SilentlyContinue).Source
+if (-not $pkgCmd) { $pkgCmd = (Get-Command pnpm -ErrorAction SilentlyContinue).Source }
+if (-not $pkgCmd) { $pkgCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source }
+if (-not $pkgCmd) { $pkgCmd = (Get-Command npm -ErrorAction SilentlyContinue).Source }
+
+if (-not $pkgCmd) {
+  throw "[dev-up] Neither pnpm nor npm found on PATH."
+}
+
+if ($pkgCmd -match "pnpm") {
+  & $pkgCmd dev
+} else {
+  & $pkgCmd run dev
+}

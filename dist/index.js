@@ -1,10 +1,18 @@
 // backend/_core/index.ts
 import "dotenv/config";
-import express2 from "express";
-import compression from "compression";
 import { createServer } from "http";
 import net from "net";
+
+// backend/_core/app.ts
+import "dotenv/config";
+import compression from "compression";
+import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+
+// backend/routers.ts
+import bcrypt3 from "bcryptjs";
+import { z as z17 } from "zod";
+import { TRPCError as TRPCError14 } from "@trpc/server";
 
 // shared/const.ts
 var COOKIE_NAME = "app_session_id";
@@ -28,11 +36,45 @@ var decodeOAuthState = (state) => {
   return { redirectUri: decoded };
 };
 
-// backend/_core/oauth.ts
-import { parse as parseCookieHeader2 } from "cookie";
+// backend/_core/cookies.ts
+function isSecureRequest(req) {
+  if (req.protocol === "https") return true;
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  if (!forwardedProto) return false;
+  const protoList = Array.isArray(forwardedProto) ? forwardedProto : forwardedProto.split(",");
+  return protoList.some((proto) => proto.trim().toLowerCase() === "https");
+}
+function getSessionCookieOptions(req) {
+  const secure = isSecureRequest(req);
+  return {
+    httpOnly: true,
+    path: "/",
+    // Chrome rejects SameSite=None cookies that are not marked Secure, so on
+    // plain HTTP (local development, non-HTTPS deployments) fall back to the
+    // default Lax policy. Same-origin XHR still carries the session cookie,
+    // and HTTPS requests keep the cross-site-capable None; Secure pair.
+    sameSite: secure ? "none" : "lax",
+    secure
+  };
+}
+
+// shared/_core/errors.ts
+var HttpError = class extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = "HttpError";
+  }
+};
+var ForbiddenError = (msg) => new HttpError(403, msg);
+
+// backend/_core/sdk.ts
+import axios from "axios";
+import { parse as parseCookieHeader } from "cookie";
+import { SignJWT, jwtVerify } from "jose";
 
 // backend/db.ts
-import { and, asc, count, desc, eq, gt, inArray, isNull, like, max, or, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, like, max, or, sql, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 
 // backend/drizzle/schema.ts
@@ -49,6 +91,10 @@ var users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin", "project_manager", "field_staff", "finance", "monitoring", "management"]).default("user").notNull(),
+  /** Optional local credential for the Foundation owner login. Only the seeded
+   * owner account (aaswfoundation06@gmail.com) carries a hash; everyone else
+   * signs in through the platform OAuth flow. */
+  passwordHash: varchar("passwordHash", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull()
@@ -868,6 +914,16 @@ async function getUserByOpenId(openId) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
+async function getOwnerLoginUser(email) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get owner login user: database not available");
+    return void 0;
+  }
+  const result = await db.select().from(users).where(eq(users.email, email.trim().toLowerCase())).limit(1);
+  const user = result.length > 0 ? result[0] : void 0;
+  return user?.passwordHash ? user : void 0;
+}
 async function createPaymentTransaction(transaction) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for payment transaction creation.");
@@ -927,6 +983,11 @@ async function createMembershipApplicationWithActivation(input) {
           city: input.application.city,
           state: input.application.state,
           district: input.application.district,
+          // The welcome email delivers this password to the member, so they
+          // can sign in straight away; the portal's Change password page
+          // lets them replace it after the first sign-in.
+          passwordHash: input.passwordHash,
+          mustChangePassword: false,
           joiningDate: /* @__PURE__ */ new Date()
         });
         const memberId = Number(created[0].insertId);
@@ -1643,6 +1704,19 @@ async function getMembershipApplicationProofKey(applicationRef) {
   const rows = await db.select({ idProofStorageKey: membershipApplications.idProofStorageKey }).from(membershipApplications).where(eq(membershipApplications.applicationRef, applicationRef)).limit(1);
   return rows[0]?.idProofStorageKey;
 }
+async function listMemberDocumentRecords() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  const membershipDocs = await db.select({ kind: sql`'membership_proof'`.as("kind"), ref: membershipApplications.applicationRef, memberName: membershipApplications.fullName, membershipNo: sql`NULL`.as("membershipNo"), email: membershipApplications.email, fileName: membershipApplications.idProofOriginalName, mimeType: membershipApplications.idProofMimeType, storageKey: membershipApplications.idProofStorageKey, uploadedAt: membershipApplications.createdAt }).from(membershipApplications).orderBy(desc(membershipApplications.createdAt));
+  const completionDocs = await db.select({ kind: sql`'completion_proof'`.as("kind"), ref: memberServiceCompletions.completionRef, memberName: members.fullName, membershipNo: members.membershipNo, email: members.email, fileName: memberServiceCompletionProofs.originalName, mimeType: memberServiceCompletionProofs.mimeType, storageKey: memberServiceCompletionProofs.storageKey, uploadedAt: memberServiceCompletionProofs.createdAt }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).innerJoin(members, eq(memberServiceCompletions.memberId, members.id)).orderBy(desc(memberServiceCompletionProofs.createdAt));
+  return { membershipDocs, completionDocs };
+}
+async function getCompletionProofByRef(completionRef) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  const rows = await db.select({ storageKey: memberServiceCompletionProofs.storageKey, mimeType: memberServiceCompletionProofs.mimeType, originalName: memberServiceCompletionProofs.originalName }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).where(eq(memberServiceCompletions.completionRef, completionRef)).limit(1);
+  return rows[0];
+}
 async function listContactInquiries(limit) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for Foundation management.");
@@ -1946,42 +2020,7 @@ async function getMisProjectCommandCenter(projectId4) {
   return { ...detail, delivery, risks: risks.filter((risk) => risk.projectId === projectId4), reports: reports.filter((report) => report.projectId === projectId4) };
 }
 
-// backend/_core/cookies.ts
-function isSecureRequest(req) {
-  if (req.protocol === "https") return true;
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  if (!forwardedProto) return false;
-  const protoList = Array.isArray(forwardedProto) ? forwardedProto : forwardedProto.split(",");
-  return protoList.some((proto) => proto.trim().toLowerCase() === "https");
-}
-function getSessionCookieOptions(req) {
-  const secure = isSecureRequest(req);
-  return {
-    httpOnly: true,
-    path: "/",
-    // Chrome rejects SameSite=None cookies that are not marked Secure, so on
-    // plain HTTP (local development, non-HTTPS deployments) fall back to the
-    // default Lax policy. Same-origin XHR still carries the session cookie,
-    // and HTTPS requests keep the cross-site-capable None; Secure pair.
-    sameSite: secure ? "none" : "lax",
-    secure
-  };
-}
-
-// shared/_core/errors.ts
-var HttpError = class extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "HttpError";
-  }
-};
-var ForbiddenError = (msg) => new HttpError(403, msg);
-
 // backend/_core/sdk.ts
-import axios from "axios";
-import { parse as parseCookieHeader } from "cookie";
-import { SignJWT, jwtVerify } from "jose";
 var isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
 var EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 var GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
@@ -2224,197 +2263,6 @@ function buildCronUser(userInfo) {
 }
 var sdk = new SDKServer();
 
-// backend/_core/oauth.ts
-function getQueryParam(req, key) {
-  const value = req.query[key];
-  return typeof value === "string" ? value : void 0;
-}
-function registerOAuthRoutes(app) {
-  app.get("/api/oauth/callback", async (req, res) => {
-    if (!ENV.oAuthServerUrl) {
-      res.status(503).json({ error: "OAuth is not configured on this deployment" });
-      return;
-    }
-    const code = getQueryParam(req, "code");
-    const state = getQueryParam(req, "state");
-    if (!code || !state) {
-      res.status(400).json({ error: "code and state are required" });
-      return;
-    }
-    const { nonce } = decodeOAuthState(state);
-    const expectedNonce = parseCookieHeader2(req.headers.cookie ?? "")[OAUTH_STATE_COOKIE];
-    if (!nonce || nonce !== expectedNonce) {
-      res.status(403).json({ error: "invalid oauth state" });
-      return;
-    }
-    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
-    try {
-      const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-      const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-      if (!userInfo.openId) {
-        res.status(400).json({ error: "openId missing from user info" });
-        return;
-      }
-      await upsertUser({
-        openId: userInfo.openId,
-        name: userInfo.name || null,
-        email: userInfo.email ?? null,
-        loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-        lastSignedIn: /* @__PURE__ */ new Date()
-      });
-      const sessionToken = await sdk.createSessionToken(userInfo.openId, {
-        name: userInfo.name || "",
-        expiresInMs: ONE_YEAR_MS
-      });
-      const cookieOptions = getSessionCookieOptions(req);
-      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-      res.redirect(302, "/");
-    } catch (error) {
-      console.error("[OAuth] Callback failed", error);
-      res.status(500).json({ error: "OAuth callback failed" });
-    }
-  });
-}
-
-// backend/_core/storageProxy.ts
-import fs from "fs";
-import path from "path";
-var rootPublicAssetKey = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
-function resolveLocalPublicStorageDir() {
-  const candidates = [
-    path.resolve(import.meta.dirname, "../../frontend/public/manus-storage"),
-    // dev: backend/_core -> <root>/frontend/public/manus-storage
-    path.resolve(import.meta.dirname, "../frontend/public/manus-storage")
-    // bundled prod: dist -> <root>/frontend/public/manus-storage
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
-    } catch {
-    }
-  }
-  return candidates[0];
-}
-var localPublicStorageDir = resolveLocalPublicStorageDir();
-function resolveLocalUploadsDir() {
-  const candidates = [
-    path.resolve(import.meta.dirname, "../../.local-storage"),
-    // dev: server/_core -> <root>/.local-storage
-    path.resolve(import.meta.dirname, "../.local-storage")
-    // bundled prod: dist -> <root>/.local-storage
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) return candidate;
-    } catch {
-    }
-  }
-  return candidates[0];
-}
-var localUploadsDir = resolveLocalUploadsDir();
-var storageContentTypes = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".pdf": "application/pdf"
-};
-function normalizePublicStorageKey(key) {
-  const normalized = key.trim();
-  if (!normalized || normalized !== key || normalized.includes("\\") || normalized.includes("..") || normalized.includes("\0")) return null;
-  return normalized;
-}
-async function canServePublicStorageKey(key, dependencies = {}) {
-  const normalized = normalizePublicStorageKey(key);
-  if (!normalized) return false;
-  if (rootPublicAssetKey.test(normalized)) return true;
-  if (!normalized.startsWith("gallery-media/")) return false;
-  const lookup = dependencies.isPublishedGalleryStorageKey ?? isPublishedGalleryStorageKey;
-  try {
-    return await lookup(normalized);
-  } catch (error) {
-    console.error("[StorageProxy] gallery publication lookup failed:", error);
-    return false;
-  }
-}
-function serveLocalStorageAsset(key, res) {
-  const localPath = path.join(localPublicStorageDir, key);
-  if (!localPath.startsWith(localPublicStorageDir + path.sep)) return false;
-  if (!fs.existsSync(localPath) || !fs.statSync(localPath).isFile()) return false;
-  const contentType = storageContentTypes[path.extname(key).toLowerCase()];
-  if (!contentType) return false;
-  res.set("Cache-Control", "public, max-age=86400");
-  res.type(contentType).sendFile(localPath);
-  return true;
-}
-function serveLocalUploadAsset(key, res) {
-  const localPath = path.join(localUploadsDir, key);
-  if (!localPath.startsWith(localUploadsDir + path.sep)) return false;
-  if (!fs.existsSync(localPath) || !fs.statSync(localPath).isFile()) return false;
-  const contentType = storageContentTypes[path.extname(key).toLowerCase()];
-  if (!contentType) return false;
-  res.set("Cache-Control", "public, max-age=86400");
-  res.type(contentType).sendFile(localPath);
-  return true;
-}
-function registerStorageProxy(app) {
-  app.get("/manus-storage/*", async (req, res) => {
-    const key = req.params[0];
-    if (!key) {
-      res.status(400).send("Missing storage key");
-      return;
-    }
-    if (!await canServePublicStorageKey(key)) {
-      res.status(404).send("Stored asset was not found");
-      return;
-    }
-    if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
-      if (serveLocalStorageAsset(key, res)) return;
-      if (serveLocalUploadAsset(key, res)) return;
-      res.status(500).send("Storage proxy not configured");
-      return;
-    }
-    let forgeApiUrl;
-    let forgeApiKey;
-    try {
-      forgeApiUrl = new URL(ENV.forgeApiUrl).toString();
-      forgeApiKey = ENV.forgeApiKey;
-    } catch {
-      console.error("[StorageProxy] invalid BUILT_IN_FORGE_API_URL configured");
-      res.status(500).send("Storage proxy misconfigured");
-      return;
-    }
-    try {
-      const forgeUrl = new URL(
-        "v1/storage/presign/get",
-        forgeApiUrl.replace(/\/+$/, "") + "/"
-      );
-      forgeUrl.searchParams.set("path", key);
-      const forgeResp = await fetch(forgeUrl, {
-        headers: { Authorization: `Bearer ${forgeApiKey}` }
-      });
-      if (!forgeResp.ok) {
-        const body = await forgeResp.text().catch(() => "");
-        console.error(`[StorageProxy] forge error: ${forgeResp.status} ${body}`);
-        res.status(502).send("Storage backend error");
-        return;
-      }
-      const { url } = await forgeResp.json();
-      if (!url) {
-        res.status(502).send("Empty signed URL from backend");
-        return;
-      }
-      res.set("Cache-Control", "no-store");
-      res.redirect(307, url);
-    } catch (err) {
-      console.error("[StorageProxy] failed:", err);
-      res.status(502).send("Storage proxy error");
-    }
-  });
-}
-
 // backend/_core/systemRouter.ts
 import { z } from "zod";
 
@@ -2587,12 +2435,33 @@ var systemRouter = router({
 });
 
 // backend/routers/membership.ts
+import bcrypt from "bcryptjs";
 import { TRPCError as TRPCError3 } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z as z2 } from "zod";
 
 // backend/email/memberActivation.ts
 import nodemailer from "nodemailer";
+
+// backend/email/logo.ts
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+var AASW_LOGO_CID = "aasw-foundation-logo";
+var LOGO_CANDIDATES = [
+  resolve(process.cwd(), "frontend/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
+  resolve(process.cwd(), "dist/public/manus-storage/aasw-foundation-official-logo_41a4007d.png")
+];
+function aaswLogoAttachment() {
+  const logoPath = LOGO_CANDIDATES.find((candidate) => existsSync(candidate)) ?? LOGO_CANDIDATES[0];
+  return {
+    filename: "aasw-foundation-logo.png",
+    content: readFileSync(logoPath),
+    cid: AASW_LOGO_CID,
+    contentType: "image/png"
+  };
+}
+
+// backend/email/memberActivation.ts
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 }
@@ -2601,13 +2470,7 @@ var FOUNDATION_SOCIAL_LINKS = {
   instagram: "https://www.instagram.com/aaswfoundation",
   linkedin: "https://www.linkedin.com/company/108100135/"
 };
-function officialLogoUrl(actionUrl) {
-  try {
-    return new URL("/manus-storage/aasw-foundation-official-logo_41a4007d.png", new URL(actionUrl).origin).toString();
-  } catch {
-    return "/manus-storage/aasw-foundation-official-logo_41a4007d.png";
-  }
-}
+var logoSrc = `cid:${AASW_LOGO_CID}`;
 function smtpConfig() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT);
@@ -2619,23 +2482,28 @@ function smtpConfig() {
 async function deliverWithFoundationGmail(mail) {
   const smtp = smtpConfig();
   const transport = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
-  return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
+  return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, attachments: [aaswLogoAttachment()], ...mail });
 }
 function createMemberActivationEmail(input) {
-  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), setupUrl: escapeHtml(input.setupUrl), certificateUrl: escapeHtml(input.certificateUrl ?? ""), logoUrl: escapeHtml(officialLogoUrl(input.setupUrl)), facebook: FOUNDATION_SOCIAL_LINKS.facebook, instagram: FOUNDATION_SOCIAL_LINKS.instagram, linkedin: FOUNDATION_SOCIAL_LINKS.linkedin };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), loginPassword: escapeHtml(input.loginPassword), loginUrl: escapeHtml(input.loginUrl), certificateUrl: escapeHtml(input.certificateUrl ?? ""), logoUrl: logoSrc, facebook: FOUNDATION_SOCIAL_LINKS.facebook, instagram: FOUNDATION_SOCIAL_LINKS.instagram, linkedin: FOUNDATION_SOCIAL_LINKS.linkedin };
   return {
-    subject: "Your AASW Foundation Membership Is Approved",
+    subject: "Welcome to AASW Foundation \u2014 Your Member Login Details Inside",
     text: `Dear ${input.fullName},
 
-Congratulations. Your AASW Foundation membership is approved and your member account is active.
+Congratulations! Your AASW Foundation membership is approved and your member account is ready to use right now.
 
+Your login details:
 Membership ID: ${input.membershipNo}
+Password: ${input.loginPassword}
 
-Set your password within 72 hours: ${input.setupUrl}
+How to log in \u2014 3 easy steps:
+1. Open the Member Portal: ${input.loginUrl}
+2. Enter your Membership ID (${input.membershipNo}) or this email address
+3. Enter the password exactly as shown above
 
-View your membership certificate within 72 hours: ${input.certificateUrl}
+Download your membership certificate within 72 hours: ${input.certificateUrl}
 
-After setting your password, your certificate will remain available anytime in the secure Member Portal. For your security, do not forward this email or share either link. If you did not submit this membership application, please contact AASW Foundation.
+Your certificate stays available anytime inside the Member Portal. For your security, we recommend changing this password after your first sign-in (Member Portal \u2192 Change password). Please do not forward this email or share your login details with anyone. If you did not submit this membership application, please contact AASW Foundation immediately.
 
 Connect with AASW Foundation:
 Facebook: ${FOUNDATION_SOCIAL_LINKS.facebook}
@@ -2645,7 +2513,7 @@ LinkedIn: ${FOUNDATION_SOCIAL_LINKS.linkedin}
 AASW Foundation
 Rura, Kanpur Dehat, Uttar Pradesh 209303
 Do not reply to this email.`,
-    html: `<!doctype html><html lang="en"><body style="margin:0;background:#f6f0e6;color:#291d1d;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f0e6"><tr><td align="center" style="padding:28px 14px"><table role="presentation" width="620" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;background:#fffdf7;border:1px solid #e5ddd4"><tr><td style="padding:22px 30px;background:#174c3c"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:middle"><img src="${safe.logoUrl}" width="48" height="48" alt="AASW Foundation" style="display:block;background:#fffdf7;padding:3px" /></td><td style="padding-left:13px;vertical-align:middle"><p style="margin:0;color:#eac06e;font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase">AASW Foundation</p><p style="margin:4px 0 0;color:#ffffff;font-size:14px;font-weight:700;letter-spacing:.4px">Membership approval</p></td></tr></table></td></tr><tr><td style="padding:34px 30px 30px"><p style="margin:0 0 12px;color:#9a5d03;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">Your member account is ready</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:34px;font-weight:400;line-height:1.15">Welcome, ${safe.fullName}.</h1><p style="margin:18px 0 0;color:#584744;font-size:15px;line-height:1.7">Congratulations. Your AASW Foundation membership is approved and your member account is active. Use the Membership ID below and complete secure account setup.</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#fffaf0;border-left:4px solid #d4820a"><tr><td style="padding:17px 18px"><p style="margin:0;color:#796966;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Your Membership ID</p><p style="margin:7px 0 0;color:#291d1d;font-size:22px;font-weight:700;letter-spacing:.5px">${safe.membershipNo}</p></td></tr></table><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="padding:0 8px 10px 0"><a href="${safe.setupUrl}" style="display:inline-block;padding:14px 18px;background:#174c3c;color:#fffdf7;font-size:13px;font-weight:700;text-decoration:none">Set your password</a></td><td style="padding:0 0 10px"><a href="${safe.certificateUrl}" style="display:inline-block;padding:13px 17px;border:1px solid #174c3c;color:#174c3c;font-size:13px;font-weight:700;text-decoration:none">View certificate</a></td></tr></table><p style="margin:16px 0 0;color:#796966;font-size:12px;line-height:1.65">Both secure links expire in 72 hours. After you set a password, your certificate remains available anytime in the protected Member Portal.</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:26px;border-top:1px solid #e5ddd4"><tr><td style="padding-top:20px"><p style="margin:0;color:#5b4c47;font-size:12px;line-height:1.6">For your security, do not forward this email or share either link. If you did not submit this membership application, contact AASW Foundation.</p></td></tr></table></td></tr><tr><td style="padding:22px 30px;background:#f0e7d8;border-top:1px solid #e2d7c8"><p style="margin:0;color:#5b4c47;font-size:11px;line-height:1.6">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303</p><p style="margin:10px 0 0;color:#796966;font-size:11px">Stay connected: <a href="${safe.facebook}" style="color:#174c3c;font-weight:700;text-decoration:none">Facebook</a><span style="color:#b29f88"> \xB7 </span><a href="${safe.instagram}" style="color:#174c3c;font-weight:700;text-decoration:none">Instagram</a><span style="color:#b29f88"> \xB7 </span><a href="${safe.linkedin}" style="color:#174c3c;font-weight:700;text-decoration:none">LinkedIn</a></p><p style="margin:10px 0 0;color:#796966;font-size:10px">This is an automated account message; please do not reply.</p></td></tr></table></td></tr></table></body></html>`
+    html: `<!doctype html><html lang="en"><body style="margin:0;background:#f6f0e6;color:#291d1d;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f0e6"><tr><td align="center" style="padding:28px 14px"><table role="presentation" width="620" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;background:#fffdf7;border:1px solid #e5ddd4"><tr><td style="padding:22px 30px;background:#174c3c"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:middle"><img src="${safe.logoUrl}" width="48" height="48" alt="AASW Foundation" style="display:block;background:#fffdf7;padding:3px" /></td><td style="padding-left:13px;vertical-align:middle"><p style="margin:0;color:#eac06e;font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase">AASW Foundation</p><p style="margin:4px 0 0;color:#ffffff;font-size:14px;font-weight:700;letter-spacing:.4px">Your member account is ready</p></td></tr></table></td></tr><tr><td style="padding:34px 30px 30px"><p style="margin:0 0 12px;color:#9a5d03;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">Login details inside</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:34px;font-weight:400;line-height:1.15">Congratulations, ${safe.fullName}!</h1><p style="margin:18px 0 0;color:#584744;font-size:15px;line-height:1.7">Your AASW Foundation membership is approved and your member account is active. Your login details are below \u2014 you can sign in right away.</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0"><tr><td width="50%" style="padding-right:6px;vertical-align:top"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffaf0;border-left:4px solid #d4820a"><tr><td style="padding:15px 16px"><p style="margin:0;color:#796966;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Membership ID</p><p style="margin:7px 0 0;color:#291d1d;font-size:19px;font-weight:700;letter-spacing:.5px">${safe.membershipNo}</p></td></tr></table></td><td width="50%" style="padding-left:6px;vertical-align:top"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffaf0;border-left:4px solid #d4820a"><tr><td style="padding:15px 16px"><p style="margin:0;color:#796966;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">Password</p><p style="margin:7px 0 0;color:#291d1d;font-size:19px;font-weight:700;letter-spacing:1px">${safe.loginPassword}</p></td></tr></table></td></tr></table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 22px;background:#fffaf0;border-left:4px solid #2f6b52"><tr><td style="padding:16px 18px"><p style="margin:0 0 9px;color:#2f6b52;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">How to log in \u2014 3 easy steps</p><p style="margin:0 0 6px;color:#584744;font-size:14px;line-height:1.6"><strong>1.</strong> Open the Member Portal: <a href="${safe.loginUrl}" style="color:#174c3c;font-weight:700">${safe.loginUrl}</a></p><p style="margin:0 0 6px;color:#584744;font-size:14px;line-height:1.6"><strong>2.</strong> Enter your Membership ID <strong>${safe.membershipNo}</strong> or this email address</p><p style="margin:0;color:#584744;font-size:14px;line-height:1.6"><strong>3.</strong> Enter the password exactly as shown above</p></td></tr></table><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="padding:0 8px 10px 0"><a href="${safe.loginUrl}" style="display:inline-block;padding:14px 18px;background:#174c3c;color:#fffdf7;font-size:13px;font-weight:700;text-decoration:none">Go to Member Portal</a></td><td style="padding:0 0 10px"><a href="${safe.certificateUrl}" style="display:inline-block;padding:13px 17px;border:1px solid #174c3c;color:#174c3c;font-size:13px;font-weight:700;text-decoration:none">View certificate</a></td></tr></table><p style="margin:16px 0 0;color:#796966;font-size:12px;line-height:1.65">Your certificate link works for 72 hours; the certificate stays available anytime inside the Member Portal. For your security, we recommend changing this password after your first sign-in (Member Portal \u2192 Change password).</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:26px;border-top:1px solid #e5ddd4"><tr><td style="padding-top:20px"><p style="margin:0;color:#5b4c47;font-size:12px;line-height:1.6">For your security, do not forward this email or share your login details with anyone. If you did not submit this membership application, contact AASW Foundation immediately.</p></td></tr></table></td></tr><tr><td style="padding:22px 30px;background:#f0e7d8;border-top:1px solid #e2d7c8"><p style="margin:0;color:#5b4c47;font-size:11px;line-height:1.6">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303</p><p style="margin:10px 0 0;color:#796966;font-size:11px">Stay connected: <a href="${safe.facebook}" style="color:#174c3c;font-weight:700;text-decoration:none">Facebook</a><span style="color:#b29f88"> \xB7 </span><a href="${safe.instagram}" style="color:#174c3c;font-weight:700;text-decoration:none">Instagram</a><span style="color:#b29f88"> \xB7 </span><a href="${safe.linkedin}" style="color:#174c3c;font-weight:700;text-decoration:none">LinkedIn</a></p><p style="margin:10px 0 0;color:#796966;font-size:10px">This is an automated account message; please do not reply.</p></td></tr></table></td></tr></table></body></html>`
   };
 }
 async function dispatchMemberActivationEmail(input, dependencies = { deliver: deliverWithFoundationGmail }) {
@@ -2663,7 +2531,7 @@ async function dispatchMemberActivationEmail(input, dependencies = { deliver: de
 }
 function createMemberExpiryReminderEmail(input) {
   const expiry = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(input.expiresOn);
-  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: escapeHtml(officialLogoUrl(input.portalUrl)) };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: logoSrc };
   return {
     subject: "AASW Foundation \u2014 Your Membership Expires in 7 Days",
     text: `Dear ${input.fullName},
@@ -2694,7 +2562,7 @@ async function dispatchMemberExpiryReminderEmail(input, dependencies = { deliver
 }
 function createMemberPostGraceFollowUpEmail(input) {
   const expiry = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(input.expiresOn);
-  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: escapeHtml(officialLogoUrl(input.portalUrl)) };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), expiry: escapeHtml(expiry), portalUrl: escapeHtml(input.portalUrl), logoUrl: logoSrc };
   return {
     subject: "AASW Foundation \u2014 Renew Your Membership to Restore Portal Access",
     text: `Dear ${input.fullName},
@@ -2814,10 +2682,17 @@ function createMemberSetupToken(now = /* @__PURE__ */ new Date()) {
 function hashMemberSetupToken(token) {
   return createHash2("sha256").update(token).digest("hex");
 }
+var MEMBER_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+function generateMemberPassword() {
+  const bytes = randomBytes2(9);
+  let password = "Aasw@";
+  for (let index2 = 0; index2 < bytes.length; index2 += 1) password += MEMBER_PASSWORD_ALPHABET[bytes[index2] % MEMBER_PASSWORD_ALPHABET.length];
+  return password;
+}
 
 // backend/storage.ts
-import fs2 from "fs";
-import path2 from "path";
+import fs from "fs";
+import path from "path";
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
   const forgeKey = ENV.forgeApiKey;
@@ -2828,15 +2703,15 @@ function getForgeConfig() {
   }
   return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
 }
-var localUploadsDir2 = path2.resolve(import.meta.dirname, "../.local-storage");
+var localUploadsDir = path.resolve(import.meta.dirname, "../.local-storage");
 function putLocalUpload(key, data) {
-  fs2.mkdirSync(localUploadsDir2, { recursive: true });
-  const target = path2.resolve(localUploadsDir2, key);
-  if (!target.startsWith(localUploadsDir2 + path2.sep)) {
+  fs.mkdirSync(localUploadsDir, { recursive: true });
+  const target = path.resolve(localUploadsDir, key);
+  if (!target.startsWith(localUploadsDir + path.sep)) {
     throw new Error("Invalid storage key");
   }
-  fs2.mkdirSync(path2.dirname(target), { recursive: true });
-  fs2.writeFileSync(target, data);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, data);
 }
 function normalizeKey(relKey) {
   return relKey.replace(/^\/+/, "");
@@ -2898,12 +2773,12 @@ async function storageGetSignedUrl(relKey) {
 var localProofMimeByExtension = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", pdf: "application/pdf" };
 function storageGetLocalUpload(relKey) {
   const key = normalizeKey(relKey);
-  const target = path2.resolve(localUploadsDir2, key);
-  if (!target.startsWith(localUploadsDir2 + path2.sep)) throw new Error("Invalid storage key");
+  const target = path.resolve(localUploadsDir, key);
+  if (!target.startsWith(localUploadsDir + path.sep)) throw new Error("Invalid storage key");
   const extension = key.slice(key.lastIndexOf(".") + 1).toLowerCase();
   const mimeType = localProofMimeByExtension[extension];
   if (!mimeType) throw new Error("Unsupported proof file type");
-  return { data: fs2.readFileSync(target), mimeType };
+  return { data: fs.readFileSync(target), mimeType };
 }
 function isLocalUploadMode() {
   return !ENV.forgeApiUrl || !ENV.forgeApiKey;
@@ -2969,6 +2844,8 @@ var membershipRouter = router({
       throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR", message: "Your ID proof could not be securely uploaded. Please try again." });
     }
     const setup = createMemberSetupToken();
+    const loginPassword = generateMemberPassword();
+    const loginPasswordHash = await bcrypt.hash(loginPassword, 12);
     let activation;
     try {
       activation = await createMembershipApplicationWithActivation({
@@ -2992,6 +2869,7 @@ var membershipRouter = router({
           status: "approved",
           notificationStatus: "pending"
         },
+        passwordHash: loginPasswordHash,
         setupTokenHash: setup.tokenHash,
         setupTokenExpiresAt: setup.expiresAt,
         renewalIntent: input.renewalIntent
@@ -3010,11 +2888,11 @@ var membershipRouter = router({
     if (activation.isRenewal) {
       return { applicationRef, membershipNo: activation.membershipNo, status: "approved", renewal: true, notificationStatus: notification === "sent" ? "sent" : "failed", activationEmailStatus: "not_required" };
     }
-    const setupUrl = `${memberAppBaseUrl(ctx.req)}/member/setup-password?token=${encodeURIComponent(setup.token)}`;
+    const loginUrl = `${memberAppBaseUrl(ctx.req)}/member/login`;
     const certificateEmailToken = createMemberSetupToken();
     await createMemberCertificateEmailToken(activation.memberId, certificateEmailToken.tokenHash, certificateEmailToken.expiresAt);
     const certificateUrl = `${memberAppBaseUrl(ctx.req)}/member/email-certificate?token=${encodeURIComponent(certificateEmailToken.token)}`;
-    const activationEmail = await dispatchMemberActivationEmail({ fullName: input.fullName, email: input.email, membershipNo: activation.membershipNo, setupUrl, certificateUrl });
+    const activationEmail = await dispatchMemberActivationEmail({ fullName: input.fullName, email: input.email, membershipNo: activation.membershipNo, loginPassword, loginUrl, certificateUrl });
     return { applicationRef, membershipNo: activation.membershipNo, status: "approved", renewal: false, notificationStatus: notification === "sent" ? "sent" : "failed", activationEmailStatus: activationEmail === "sent" || activationEmail === "mocked" ? activationEmail : "failed" };
   })
 });
@@ -3718,7 +3596,7 @@ var normalizeResponseFormat = ({
 var RETRY_MAX_RETRIES = 4;
 var RETRY_BASE_DELAY_MS = 500;
 var RETRY_MAX_DELAY_MS = 3e4;
-var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var sleep = (ms) => new Promise((resolve2) => setTimeout(resolve2, ms));
 var parseRetryAfter = (value) => {
   if (!value) return void 0;
   const seconds = Number(value);
@@ -4129,6 +4007,13 @@ var razorpayRefundSchema = z8.object({
   status: z8.string(),
   payment_id: z8.string().min(1)
 });
+var razorpayPaymentSchema = z8.object({
+  id: z8.string().min(1),
+  order_id: z8.string().min(1),
+  amount: z8.number().int().positive(),
+  currency: z8.string().length(3),
+  status: z8.string()
+});
 function getRazorpayConfig() {
   const keyId = process.env.RAZORPAY_KEY_ID?.trim();
   const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
@@ -4166,6 +4051,17 @@ async function createRazorpayOrder(input) {
     throw new Error(`Razorpay order creation failed (${response.status}): ${text2.slice(0, 300)}`);
   }
   return razorpayOrderSchema.parse(await response.json());
+}
+async function fetchRazorpayPayment(paymentId) {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(config.keyId + ":" + config.keySecret).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/payments/" + encodeURIComponent(paymentId), {
+    headers: { Authorization: "Basic " + authorization },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!response.ok) throw new Error("Razorpay payment lookup failed (" + response.status + ").");
+  return razorpayPaymentSchema.parse(await response.json());
 }
 async function createRazorpayRefund(input) {
   const config = getRazorpayConfig();
@@ -4215,6 +4111,12 @@ function createReceipt(kind) {
 }
 var paymentRouter = router({
   liveStatus: publicProcedure.query(() => ({ configured: Boolean(getRazorpayConfig()) })),
+  receiptStatus: publicProcedure.input(z9.object({ receipt: z9.string().trim().min(6).max(40) })).query(async ({ input }) => {
+    const transaction = await getPaymentTransactionByReceipt(input.receipt);
+    if (!transaction) return { status: "not_found" };
+    if (transaction.status !== "verified" && transaction.status !== "captured") return { status: "pending" };
+    return { status: "verified", receipt: transaction.receipt, kind: transaction.kind, amount: transaction.amount / 100 };
+  }),
   createOrder: publicProcedure.input(checkoutInput).mutation(async ({ input }) => {
     const validAmount = resolveDemoAmount(input.kind, input.amount);
     if (!validAmount) throw new TRPCError8({ code: "BAD_REQUEST", message: "Unsupported payment amount." });
@@ -4242,6 +4144,15 @@ var paymentRouter = router({
     if (!transaction || !config || transaction.gatewayOrderId !== input.razorpayOrderId) throw new TRPCError8({ code: "NOT_FOUND", message: "Payment order was not found." });
     if (!verifyRazorpayCheckoutSignature(transaction.gatewayOrderId, input.razorpayPaymentId, input.razorpaySignature, config.keySecret)) {
       throw new TRPCError8({ code: "BAD_REQUEST", message: "Payment verification failed." });
+    }
+    let payment;
+    try {
+      payment = await fetchRazorpayPayment(input.razorpayPaymentId);
+    } catch {
+      throw new TRPCError8({ code: "BAD_GATEWAY", message: "The payment could not be confirmed with Razorpay. Please contact AASW before retrying." });
+    }
+    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency || payment.status !== "captured") {
+      throw new TRPCError8({ code: "PRECONDITION_FAILED", message: "Razorpay has not confirmed a captured payment matching this order. Please contact AASW before retrying." });
     }
     await markPaymentTransactionStatus(transaction.gatewayOrderId, "verified", input.razorpayPaymentId);
     const receiptDelivery = await dispatchVerifiedPaymentReceipt({ ...transaction, status: "verified", gatewayPaymentId: input.razorpayPaymentId });
@@ -4554,7 +4465,7 @@ var dashboardRouter = router({
 });
 
 // backend/routers/member.ts
-import bcrypt from "bcryptjs";
+import bcrypt2 from "bcryptjs";
 import { TRPCError as TRPCError12 } from "@trpc/server";
 import { z as z15 } from "zod";
 
@@ -4663,7 +4574,7 @@ var memberRouter = router({
     return { valid: true, certificate: { fullName: member.fullName, membershipNo: member.membershipNo, membershipTypeLabel: validity.membershipTypeLabel, joiningDate: member.joiningDate, expiresOn: validity.expiresOn } };
   }),
   setupPassword: publicProcedure.input(z15.object({ token: z15.string().min(20).max(512), password: passwordInput })).mutation(async ({ input }) => {
-    const passwordHash = await bcrypt.hash(input.password, 12);
+    const passwordHash = await bcrypt2.hash(input.password, 12);
     const completed = await setMemberPasswordFromSetupToken({ tokenHash: hashMemberSetupToken(input.token), passwordHash });
     if (!completed) throw new TRPCError12({ code: "BAD_REQUEST", message: "This setup link has expired or is invalid. Please contact AASW Foundation." });
     return { success: true };
@@ -4682,7 +4593,7 @@ var memberRouter = router({
     return { valid: Boolean(token), membershipNo: token?.membershipNo ?? null, fullName: token?.fullName ?? null };
   }),
   resetPassword: publicProcedure.input(z15.object({ token: z15.string().min(20).max(512), password: passwordInput })).mutation(async ({ input }) => {
-    const completed = await resetMemberPasswordFromToken({ tokenHash: hashMemberSetupToken(input.token), passwordHash: await bcrypt.hash(input.password, 12) });
+    const completed = await resetMemberPasswordFromToken({ tokenHash: hashMemberSetupToken(input.token), passwordHash: await bcrypt2.hash(input.password, 12) });
     if (!completed) throw new TRPCError12({ code: "BAD_REQUEST", message: "This reset link has expired or is invalid. Please request a new password reset." });
     return { success: true };
   }),
@@ -4696,7 +4607,7 @@ var memberRouter = router({
     }
     if (member.status !== "active") throw genericError();
     if (member.lockedUntil && member.lockedUntil > now) throw new TRPCError12({ code: "FORBIDDEN", message: `Your account is temporarily locked. Try again after ${member.lockedUntil.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} or contact AASW Foundation.` });
-    const correctPassword = await bcrypt.compare(input.password, member.passwordHash);
+    const correctPassword = await bcrypt2.compare(input.password, member.passwordHash);
     if (!correctPassword) {
       const lockedUntil = await recordMemberLoginFailure(member.id, member.loginAttempts, now);
       if (lockedUntil) throw new TRPCError12({ code: "FORBIDDEN", message: `Your account is temporarily locked. Try again after ${lockedUntil.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} or contact AASW Foundation.` });
@@ -4855,8 +4766,8 @@ var memberRouter = router({
   }),
   changePassword: memberProcedure.input(z15.object({ currentPassword: z15.string().min(1).max(128), password: passwordInput })).mutation(async ({ input, ctx }) => {
     const member = await getMemberById(ctx.member.id);
-    if (!member?.passwordHash || !await bcrypt.compare(input.currentPassword, member.passwordHash)) throw new TRPCError12({ code: "UNAUTHORIZED", message: "Your current password is incorrect." });
-    await changeMemberPassword(member.id, await bcrypt.hash(input.password, 12));
+    if (!member?.passwordHash || !await bcrypt2.compare(input.currentPassword, member.passwordHash)) throw new TRPCError12({ code: "UNAUTHORIZED", message: "Your current password is incorrect." });
+    await changeMemberPassword(member.id, await bcrypt2.hash(input.password, 12));
     return { success: true };
   }),
   updateProfileSettings: memberProcedure.input(z15.object({
@@ -4901,7 +4812,37 @@ var memberRouter = router({
   })
 });
 
+// backend/routers/documents.ts
+import { z as z16 } from "zod";
+import { TRPCError as TRPCError13 } from "@trpc/server";
+async function documentViewUrl(storageKey) {
+  try {
+    return { url: await storageGetSignedUrl(storageKey) };
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") throw error;
+    const local = storageGetLocalUpload(storageKey);
+    return { url: `data:${local.mimeType};base64,${local.data.toString("base64")}` };
+  }
+}
+var documentsRouter = router({
+  list: adminProcedure.query(async () => listMemberDocumentRecords()),
+  view: adminProcedure.input(z16.object({ kind: z16.enum(["membership_proof", "completion_proof"]), ref: z16.string().trim().min(6).max(40) })).mutation(async ({ input }) => {
+    if (input.kind === "membership_proof") {
+      const storageKey = await getMembershipApplicationProofKey(input.ref);
+      if (!storageKey) throw new TRPCError13({ code: "NOT_FOUND", message: "This application has no ID-proof document." });
+      const { url: url2 } = await documentViewUrl(storageKey);
+      return { url: url2 };
+    }
+    const proof = await getCompletionProofByRef(input.ref);
+    if (!proof) throw new TRPCError13({ code: "NOT_FOUND", message: "This completion report has no attached proof." });
+    if (!proof.storageKey.startsWith("member-completions/")) throw new TRPCError13({ code: "BAD_REQUEST", message: "Invalid proof key." });
+    const { url } = await documentViewUrl(proof.storageKey);
+    return { url };
+  })
+});
+
 // backend/routers.ts
+var OWNER_SESSION_MS = 12 * 60 * 60 * 1e3;
 var appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
@@ -4913,6 +4854,22 @@ var appRouter = router({
       return {
         success: true
       };
+    }),
+    // Foundation owner sign-in: only the single seeded account that carries a
+    // password hash (aaswfoundation06@gmail.com) can authenticate, and it is
+    // granted the admin role that every MIS and Foundation Admin procedure
+    // already requires. Session reuse keeps the existing adminProcedure,
+    // roleProcedure and DashboardLayout flows untouched.
+    ownerLogin: publicProcedure.input(z17.object({ email: z17.string().trim().email().max(320), password: z17.string().min(1).max(200) })).mutation(async ({ input, ctx }) => {
+      const user = await getOwnerLoginUser(input.email);
+      const passwordHash = user?.passwordHash;
+      if (!user || !passwordHash) throw new TRPCError14({ code: "UNAUTHORIZED", message: "This email is not authorised for Foundation management access." });
+      const passwordOk = await bcrypt3.compare(input.password, passwordHash);
+      if (!passwordOk) throw new TRPCError14({ code: "UNAUTHORIZED", message: "Incorrect email or password." });
+      const token = await sdk.signSession({ openId: user.openId, appId: "foundation-owner", name: user.name ?? "AASW Foundation" }, { expiresInMs: OWNER_SESSION_MS });
+      ctx.res.cookie(COOKIE_NAME, token, { ...getSessionCookieOptions(ctx.req), maxAge: OWNER_SESSION_MS });
+      await upsertUser({ openId: user.openId, lastSignedIn: /* @__PURE__ */ new Date() });
+      return { ok: true, name: user.name ?? "AASW Foundation" };
     })
   }),
   payment: paymentRouter,
@@ -4929,6 +4886,7 @@ var appRouter = router({
   governance: governanceRouter,
   dashboard: dashboardRouter,
   member: memberRouter,
+  documents: documentsRouter,
   assistant: assistantRouter
   // TODO: add feature routers here, e.g.
   // todo: router({
@@ -4937,306 +4895,6 @@ var appRouter = router({
   //   ),
   // }),
 });
-
-// backend/_core/context.ts
-async function createContext(opts) {
-  let user = null;
-  let member = null;
-  try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch {
-    user = null;
-    if (opts.req.headers.cookie?.includes(COOKIE_NAME)) {
-      try {
-        opts.res.clearCookie(COOKIE_NAME, getSessionCookieOptions(opts.req));
-      } catch {
-      }
-    }
-  }
-  try {
-    member = await authenticateMemberRequest(opts.req);
-  } catch {
-    member = null;
-    if (opts.req.headers.cookie?.includes(MEMBER_SESSION_COOKIE)) {
-      try {
-        opts.res.clearCookie(MEMBER_SESSION_COOKIE, getSessionCookieOptions(opts.req));
-      } catch {
-      }
-    }
-  }
-  return {
-    req: opts.req,
-    res: opts.res,
-    user,
-    member
-  };
-}
-
-// backend/_core/vite.ts
-import express from "express";
-import fs4 from "fs";
-import { nanoid as nanoid8 } from "nanoid";
-import path4 from "path";
-import { createServer as createViteServer } from "vite";
-
-// vite.config.ts
-import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
-import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
-import fs3 from "node:fs";
-import path3 from "node:path";
-import { defineConfig } from "vite";
-import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
-var PROJECT_ROOT = import.meta.dirname;
-var LOG_DIR = path3.join(PROJECT_ROOT, ".manus-logs");
-var MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024;
-var TRIM_TARGET_BYTES = Math.floor(MAX_LOG_SIZE_BYTES * 0.6);
-function ensureLogDir() {
-  if (!fs3.existsSync(LOG_DIR)) {
-    fs3.mkdirSync(LOG_DIR, { recursive: true });
-  }
-}
-function trimLogFile(logPath, maxSize) {
-  try {
-    if (!fs3.existsSync(logPath) || fs3.statSync(logPath).size <= maxSize) {
-      return;
-    }
-    const lines = fs3.readFileSync(logPath, "utf-8").split("\n");
-    const keptLines = [];
-    let keptBytes = 0;
-    const targetSize = TRIM_TARGET_BYTES;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const lineBytes = Buffer.byteLength(`${lines[i]}
-`, "utf-8");
-      if (keptBytes + lineBytes > targetSize) break;
-      keptLines.unshift(lines[i]);
-      keptBytes += lineBytes;
-    }
-    fs3.writeFileSync(logPath, keptLines.join("\n"), "utf-8");
-  } catch {
-  }
-}
-function writeToLogFile(source, entries) {
-  if (entries.length === 0) return;
-  ensureLogDir();
-  const logPath = path3.join(LOG_DIR, `${source}.log`);
-  const lines = entries.map((entry) => {
-    const ts = (/* @__PURE__ */ new Date()).toISOString();
-    return `[${ts}] ${JSON.stringify(entry)}`;
-  });
-  fs3.appendFileSync(logPath, `${lines.join("\n")}
-`, "utf-8");
-  trimLogFile(logPath, MAX_LOG_SIZE_BYTES);
-}
-function vitePluginManusDebugCollector() {
-  return {
-    name: "manus-debug-collector",
-    transformIndexHtml(html) {
-      if (process.env.NODE_ENV === "production") {
-        return html;
-      }
-      return {
-        html,
-        tags: [
-          {
-            tag: "script",
-            attrs: {
-              src: "/__manus__/debug-collector.js",
-              defer: true
-            },
-            injectTo: "head"
-          }
-        ]
-      };
-    },
-    configureServer(server) {
-      server.middlewares.use("/__manus__/logs", (req, res, next) => {
-        if (req.method !== "POST") {
-          return next();
-        }
-        const handlePayload = (payload) => {
-          if (payload.consoleLogs?.length > 0) {
-            writeToLogFile("browserConsole", payload.consoleLogs);
-          }
-          if (payload.networkRequests?.length > 0) {
-            writeToLogFile("networkRequests", payload.networkRequests);
-          }
-          if (payload.sessionEvents?.length > 0) {
-            writeToLogFile("sessionReplay", payload.sessionEvents);
-          }
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ success: true }));
-        };
-        const reqBody = req.body;
-        if (reqBody && typeof reqBody === "object") {
-          try {
-            handlePayload(reqBody);
-          } catch (e) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: false, error: String(e) }));
-          }
-          return;
-        }
-        let body = "";
-        req.on("data", (chunk) => {
-          body += chunk.toString();
-        });
-        req.on("end", () => {
-          try {
-            const payload = JSON.parse(body);
-            handlePayload(payload);
-          } catch (e) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: false, error: String(e) }));
-          }
-        });
-      });
-    }
-  };
-}
-function vitePluginAnalyticsPlaceholder() {
-  return {
-    name: "analytics-placeholder",
-    transformIndexHtml(html) {
-      const endpoint = process.env.VITE_ANALYTICS_ENDPOINT?.trim();
-      const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID?.trim();
-      if (endpoint && websiteId) {
-        return html.replaceAll("%VITE_ANALYTICS_ENDPOINT%", endpoint).replaceAll("%VITE_ANALYTICS_WEBSITE_ID%", websiteId);
-      }
-      return html.replace(
-        /\s*<script[^>]*src="(?:%VITE_ANALYTICS_ENDPOINT%|)\/umami"[^>]*>\s*<\/script>/g,
-        ""
-      );
-    }
-  };
-}
-var vite_config_default = defineConfig(({ mode }) => {
-  const isDev = mode !== "production";
-  const plugins = [
-    react(),
-    tailwindcss(),
-    jsxLocPlugin(),
-    ...isDev ? [vitePluginManusRuntime()] : [],
-    vitePluginAnalyticsPlaceholder(),
-    ...isDev ? [vitePluginManusDebugCollector()] : []
-  ];
-  return {
-    plugins,
-    resolve: {
-      alias: {
-        "@": path3.resolve(import.meta.dirname, "frontend", "src"),
-        "@shared": path3.resolve(import.meta.dirname, "shared"),
-        "@assets": path3.resolve(import.meta.dirname, "attached_assets")
-      }
-    },
-    envDir: path3.resolve(import.meta.dirname),
-    root: path3.resolve(import.meta.dirname, "frontend"),
-    publicDir: path3.resolve(import.meta.dirname, "frontend", "public"),
-    build: {
-      outDir: path3.resolve(import.meta.dirname, "dist/public"),
-      emptyOutDir: true,
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (!id.includes("node_modules")) return void 0;
-            const normalizedId = id.replace(/\\/g, "/");
-            if (id.includes("jspdf") || id.includes("html2canvas")) return "vendor-pdf";
-            if (id.includes("@trpc") || id.includes("@tanstack/react-query") || id.includes("superjson")) return "vendor-data";
-            if (normalizedId.includes("/node_modules/react/") || normalizedId.includes("/node_modules/react-dom/") || normalizedId.includes("/node_modules/scheduler/") || normalizedId.includes("/node_modules/wouter/")) return "vendor-react";
-            if (normalizedId.includes("/node_modules/@radix/")) return "vendor-ui";
-            if (id.includes("lucide-react")) return "vendor-icons";
-            return void 0;
-          }
-        }
-      }
-    },
-    server: {
-      host: true,
-      allowedHosts: [
-        ".manuspre.computer",
-        ".manus.computer",
-        ".manus-asia.computer",
-        ".manuscomputer.ai",
-        ".manusvm.computer",
-        "localhost",
-        "127.0.0.1"
-      ],
-      fs: {
-        strict: true,
-        deny: ["**/.*"]
-      }
-    }
-  };
-});
-
-// backend/_core/vite.ts
-function resolveViteConfig() {
-  const mode = process.env.NODE_ENV === "production" ? "production" : "development";
-  return typeof vite_config_default === "function" ? vite_config_default({ mode }) : vite_config_default;
-}
-async function setupVite(app, server) {
-  const serverOptions = {
-    middlewareMode: true,
-    hmr: { server },
-    allowedHosts: true
-  };
-  const vite = await createViteServer({
-    ...resolveViteConfig(),
-    configFile: false,
-    server: serverOptions,
-    appType: "custom"
-  });
-  app.use(vite.middlewares);
-  app.use("*", async (req, res, next) => {
-    const url = req.originalUrl;
-    try {
-      const clientTemplate = path4.resolve(
-        import.meta.dirname,
-        "../..",
-        "frontend",
-        "index.html"
-      );
-      let template = await fs4.promises.readFile(clientTemplate, "utf-8");
-      template = template.replace(
-        `src="/src/main.tsx"`,
-        `src="/src/main.tsx?v=${nanoid8()}"`
-      );
-      const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
-    } catch (e) {
-      vite.ssrFixStacktrace(e);
-      next(e);
-    }
-  });
-}
-function serveStatic(app) {
-  const distPath = process.env.NODE_ENV === "development" ? path4.resolve(import.meta.dirname, "../..", "dist", "public") : path4.resolve(import.meta.dirname, "public");
-  if (!fs4.existsSync(distPath)) {
-    console.error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`
-    );
-  }
-  app.use(
-    "/assets",
-    express.static(path4.join(distPath, "assets"), {
-      fallthrough: false,
-      maxAge: "365d",
-      immutable: true
-    })
-  );
-  app.get("/favicon.ico", (_req, res) => {
-    res.redirect(302, "/manus-storage/aasw-foundation-official-logo_41a4007d.png");
-  });
-  app.use(express.static(distPath));
-  app.use("*", (req, res) => {
-    const pathname = req.originalUrl?.split("?")[0] ?? "";
-    if (path4.extname(pathname)) {
-      res.status(404).type("text/plain").send("Not found");
-      return;
-    }
-    res.sendFile(path4.resolve(distPath, "index.html"));
-  });
-}
 
 // backend/payments/webhook.ts
 import { createHash as createHash3 } from "node:crypto";
@@ -5426,6 +5084,7 @@ function applyHttpSecurity(req, res, next) {
 // backend/_core/rateLimit.ts
 var rules = {
   "member.login": { id: "member.login", maxAttempts: 8, windowMs: 15 * 60 * 1e3 },
+  "auth.ownerLogin": { id: "auth.ownerLogin", maxAttempts: 8, windowMs: 15 * 60 * 1e3 },
   "member.requestPasswordReset": { id: "member.requestPasswordReset", maxAttempts: 5, windowMs: 15 * 60 * 1e3 },
   "member.setupPassword": { id: "member.setupPassword", maxAttempts: 5, windowMs: 15 * 60 * 1e3 },
   "member.resetPassword": { id: "member.resetPassword", maxAttempts: 5, windowMs: 15 * 60 * 1e3 },
@@ -5544,6 +5203,232 @@ async function enforceSensitiveMutationRateLimit(req, res, next) {
   }
 }
 
+// backend/_core/context.ts
+async function createContext(opts) {
+  let user = null;
+  let member = null;
+  try {
+    user = await sdk.authenticateRequest(opts.req);
+  } catch {
+    user = null;
+    if (opts.req.headers.cookie?.includes(COOKIE_NAME)) {
+      try {
+        opts.res.clearCookie(COOKIE_NAME, getSessionCookieOptions(opts.req));
+      } catch {
+      }
+    }
+  }
+  try {
+    member = await authenticateMemberRequest(opts.req);
+  } catch {
+    member = null;
+    if (opts.req.headers.cookie?.includes(MEMBER_SESSION_COOKIE)) {
+      try {
+        opts.res.clearCookie(MEMBER_SESSION_COOKIE, getSessionCookieOptions(opts.req));
+      } catch {
+      }
+    }
+  }
+  return {
+    req: opts.req,
+    res: opts.res,
+    user,
+    member
+  };
+}
+
+// backend/_core/oauth.ts
+import { parse as parseCookieHeader2 } from "cookie";
+function getQueryParam(req, key) {
+  const value = req.query[key];
+  return typeof value === "string" ? value : void 0;
+}
+function registerOAuthRoutes(app) {
+  app.get("/api/oauth/callback", async (req, res) => {
+    if (!ENV.oAuthServerUrl) {
+      res.status(503).json({ error: "OAuth is not configured on this deployment" });
+      return;
+    }
+    const code = getQueryParam(req, "code");
+    const state = getQueryParam(req, "state");
+    if (!code || !state) {
+      res.status(400).json({ error: "code and state are required" });
+      return;
+    }
+    const { nonce } = decodeOAuthState(state);
+    const expectedNonce = parseCookieHeader2(req.headers.cookie ?? "")[OAUTH_STATE_COOKIE];
+    if (!nonce || nonce !== expectedNonce) {
+      res.status(403).json({ error: "invalid oauth state" });
+      return;
+    }
+    res.clearCookie(OAUTH_STATE_COOKIE, { path: "/", secure: true, sameSite: "none" });
+    try {
+      const tokenResponse = await sdk.exchangeCodeForToken(code, state);
+      const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
+      if (!userInfo.openId) {
+        res.status(400).json({ error: "openId missing from user info" });
+        return;
+      }
+      await upsertUser({
+        openId: userInfo.openId,
+        name: userInfo.name || null,
+        email: userInfo.email ?? null,
+        loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
+        lastSignedIn: /* @__PURE__ */ new Date()
+      });
+      const sessionToken = await sdk.createSessionToken(userInfo.openId, {
+        name: userInfo.name || "",
+        expiresInMs: ONE_YEAR_MS
+      });
+      const cookieOptions = getSessionCookieOptions(req);
+      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+      res.redirect(302, "/");
+    } catch (error) {
+      console.error("[OAuth] Callback failed", error);
+      res.status(500).json({ error: "OAuth callback failed" });
+    }
+  });
+}
+
+// backend/_core/storageProxy.ts
+import fs2 from "fs";
+import path2 from "path";
+var rootPublicAssetKey = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+function resolveLocalPublicStorageDir() {
+  const candidates = [
+    path2.resolve(import.meta.dirname, "../../frontend/public/manus-storage"),
+    // dev: backend/_core -> <root>/frontend/public/manus-storage
+    path2.resolve(import.meta.dirname, "../frontend/public/manus-storage")
+    // bundled prod: dist -> <root>/frontend/public/manus-storage
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs2.existsSync(candidate) && fs2.statSync(candidate).isDirectory()) return candidate;
+    } catch {
+    }
+  }
+  return candidates[0];
+}
+var localPublicStorageDir = resolveLocalPublicStorageDir();
+function resolveLocalUploadsDir() {
+  const candidates = [
+    path2.resolve(import.meta.dirname, "../../.local-storage"),
+    // dev: server/_core -> <root>/.local-storage
+    path2.resolve(import.meta.dirname, "../.local-storage")
+    // bundled prod: dist -> <root>/.local-storage
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs2.existsSync(candidate) && fs2.statSync(candidate).isDirectory()) return candidate;
+    } catch {
+    }
+  }
+  return candidates[0];
+}
+var localUploadsDir2 = resolveLocalUploadsDir();
+var storageContentTypes = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf"
+};
+function normalizePublicStorageKey(key) {
+  const normalized = key.trim();
+  if (!normalized || normalized !== key || normalized.includes("\\") || normalized.includes("..") || normalized.includes("\0")) return null;
+  return normalized;
+}
+async function canServePublicStorageKey(key, dependencies = {}) {
+  const normalized = normalizePublicStorageKey(key);
+  if (!normalized) return false;
+  if (rootPublicAssetKey.test(normalized)) return true;
+  if (!normalized.startsWith("gallery-media/")) return false;
+  const lookup = dependencies.isPublishedGalleryStorageKey ?? isPublishedGalleryStorageKey;
+  try {
+    return await lookup(normalized);
+  } catch (error) {
+    console.error("[StorageProxy] gallery publication lookup failed:", error);
+    return false;
+  }
+}
+function serveLocalStorageAsset(key, res) {
+  const localPath = path2.join(localPublicStorageDir, key);
+  if (!localPath.startsWith(localPublicStorageDir + path2.sep)) return false;
+  if (!fs2.existsSync(localPath) || !fs2.statSync(localPath).isFile()) return false;
+  const contentType = storageContentTypes[path2.extname(key).toLowerCase()];
+  if (!contentType) return false;
+  res.set("Cache-Control", "public, max-age=86400");
+  res.type(contentType).sendFile(localPath);
+  return true;
+}
+function serveLocalUploadAsset(key, res) {
+  const localPath = path2.join(localUploadsDir2, key);
+  if (!localPath.startsWith(localUploadsDir2 + path2.sep)) return false;
+  if (!fs2.existsSync(localPath) || !fs2.statSync(localPath).isFile()) return false;
+  const contentType = storageContentTypes[path2.extname(key).toLowerCase()];
+  if (!contentType) return false;
+  res.set("Cache-Control", "public, max-age=86400");
+  res.type(contentType).sendFile(localPath);
+  return true;
+}
+function registerStorageProxy(app) {
+  app.get("/manus-storage/*", async (req, res) => {
+    const key = req.params[0];
+    if (!key) {
+      res.status(400).send("Missing storage key");
+      return;
+    }
+    if (!await canServePublicStorageKey(key)) {
+      res.status(404).send("Stored asset was not found");
+      return;
+    }
+    if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
+      if (serveLocalStorageAsset(key, res)) return;
+      if (serveLocalUploadAsset(key, res)) return;
+      res.status(500).send("Storage proxy not configured");
+      return;
+    }
+    let forgeApiUrl;
+    let forgeApiKey;
+    try {
+      forgeApiUrl = new URL(ENV.forgeApiUrl).toString();
+      forgeApiKey = ENV.forgeApiKey;
+    } catch {
+      console.error("[StorageProxy] invalid BUILT_IN_FORGE_API_URL configured");
+      res.status(500).send("Storage proxy misconfigured");
+      return;
+    }
+    try {
+      const forgeUrl = new URL(
+        "v1/storage/presign/get",
+        forgeApiUrl.replace(/\/+$/, "") + "/"
+      );
+      forgeUrl.searchParams.set("path", key);
+      const forgeResp = await fetch(forgeUrl, {
+        headers: { Authorization: `Bearer ${forgeApiKey}` }
+      });
+      if (!forgeResp.ok) {
+        const body = await forgeResp.text().catch(() => "");
+        console.error(`[StorageProxy] forge error: ${forgeResp.status} ${body}`);
+        res.status(502).send("Storage backend error");
+        return;
+      }
+      const { url } = await forgeResp.json();
+      if (!url) {
+        res.status(502).send("Empty signed URL from backend");
+        return;
+      }
+      res.set("Cache-Control", "no-store");
+      res.redirect(307, url);
+    } catch (err) {
+      console.error("[StorageProxy] failed:", err);
+      res.status(502).send("Storage proxy error");
+    }
+  });
+}
+
 // backend/_core/sitemap.ts
 var PUBLIC_SITEMAP_PATHS = [
   "/",
@@ -5584,69 +5469,9 @@ function publicSiteOrigin({ protocol, host }) {
   return `${protocol === "http" ? "http" : "https"}://${host || "localhost:3000"}`;
 }
 
-// backend/_core/index.ts
-function isPortAvailable(port) {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
-  });
-}
-async function findAvailablePort(startPort = 3e3) {
-  for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found starting from ${startPort}`);
-}
-async function ensureDatabaseRunning() {
-  const isFree = await isPortAvailable(3306);
-  if (!isFree) {
-    console.log("[AutoDB] Local MySQL is active on 127.0.0.1:3306.");
-    return;
-  }
-  console.log("[AutoDB] Local MySQL is not running on 3306. Auto-booting persistent database...");
-  try {
-    const { spawn } = await import("child_process");
-    const path5 = await import("path");
-    const scriptPath = path5.resolve(process.cwd(), "scripts/runPersistentDb.ts");
-    const pnpmCmd = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-    const useShell = process.platform === "win32";
-    const dbProc = spawn(
-      useShell ? `"${pnpmCmd}"` : pnpmCmd,
-      useShell ? ["exec", "tsx", `"${scriptPath}"`] : ["exec", "tsx", scriptPath],
-      {
-        cwd: process.cwd(),
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-        shell: useShell
-      }
-    );
-    dbProc.on("error", (spawnError) => {
-      console.error("[AutoDB] Persistent database process could not start:", spawnError);
-    });
-    dbProc.unref();
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const free = await isPortAvailable(3306);
-      if (!free) {
-        console.log("[AutoDB] Local MySQL is UP on 127.0.0.1:3306.");
-        return;
-      }
-    }
-    console.warn("[AutoDB] Warning: MySQL did not respond on 3306 within 20s.");
-  } catch (err) {
-    console.error("[AutoDB] Failed to auto-start MySQL:", err);
-  }
-}
-async function startServer() {
-  await ensureDatabaseRunning();
-  const app = express2();
-  const server = createServer(app);
+// backend/_core/app.ts
+function createApiApp() {
+  const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
   app.use(compression());
@@ -5670,33 +5495,506 @@ async function startServer() {
       }
     });
   }
-  app.post("/api/razorpay/webhook", express2.raw({ type: "application/json", limit: "1mb" }), handleRazorpayWebhook);
-  app.use(express2.json({ limit: "12mb" }));
-  app.use(express2.urlencoded({ limit: "12mb", extended: true }));
+  app.post("/api/razorpay/webhook", express.raw({ type: "application/json", limit: "1mb" }), handleRazorpayWebhook);
+  app.use(express.json({ limit: "12mb" }));
+  app.use(express.urlencoded({ limit: "12mb", extended: true }));
   app.post("/api/scheduled/membership-expiry", handleMembershipExpirySchedule);
   app.post("/api/scheduled/membership-reminder", handleMembershipReminderSchedule);
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   app.use("/api/trpc", enforceSensitiveMutationRateLimit);
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-      onError: ({ error, path: path5, type }) => {
-        console.error(`[tRPC] ${type} ${path5 ?? "<unknown>"}:`, error);
+  app.use("/api/trpc", createExpressMiddleware({
+    router: appRouter,
+    createContext,
+    onError: ({ error, path: path5, type }) => {
+      console.error(`[tRPC] ${type} ${path5 ?? "<unknown>"}:`, error);
+    }
+  }));
+  return app;
+}
+
+// backend/_core/vite.ts
+import express2 from "express";
+import fs4 from "fs";
+import { nanoid as nanoid8 } from "nanoid";
+import path4 from "path";
+import { createServer as createViteServer } from "vite";
+
+// vite.config.ts
+import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import fs3 from "node:fs";
+import path3 from "node:path";
+import { defineConfig } from "vite";
+import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
+var PROJECT_ROOT = import.meta.dirname;
+var LOG_DIR = path3.join(PROJECT_ROOT, ".manus-logs");
+var MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024;
+var TRIM_TARGET_BYTES = Math.floor(MAX_LOG_SIZE_BYTES * 0.6);
+function ensureLogDir() {
+  if (!fs3.existsSync(LOG_DIR)) {
+    fs3.mkdirSync(LOG_DIR, { recursive: true });
+  }
+}
+function trimLogFile(logPath, maxSize) {
+  try {
+    if (!fs3.existsSync(logPath) || fs3.statSync(logPath).size <= maxSize) {
+      return;
+    }
+    const lines = fs3.readFileSync(logPath, "utf-8").split("\n");
+    const keptLines = [];
+    let keptBytes = 0;
+    const targetSize = TRIM_TARGET_BYTES;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const lineBytes = Buffer.byteLength(`${lines[i]}
+`, "utf-8");
+      if (keptBytes + lineBytes > targetSize) break;
+      keptLines.unshift(lines[i]);
+      keptBytes += lineBytes;
+    }
+    fs3.writeFileSync(logPath, keptLines.join("\n"), "utf-8");
+  } catch {
+  }
+}
+function writeToLogFile(source, entries) {
+  if (entries.length === 0) return;
+  ensureLogDir();
+  const logPath = path3.join(LOG_DIR, `${source}.log`);
+  const lines = entries.map((entry) => {
+    const ts = (/* @__PURE__ */ new Date()).toISOString();
+    return `[${ts}] ${JSON.stringify(entry)}`;
+  });
+  fs3.appendFileSync(logPath, `${lines.join("\n")}
+`, "utf-8");
+  trimLogFile(logPath, MAX_LOG_SIZE_BYTES);
+}
+function vitePluginManusDebugCollector() {
+  return {
+    name: "manus-debug-collector",
+    transformIndexHtml(html) {
+      if (process.env.NODE_ENV === "production") {
+        return html;
       }
+      return {
+        html,
+        tags: [
+          {
+            tag: "script",
+            attrs: {
+              src: "/__manus__/debug-collector.js",
+              defer: true
+            },
+            injectTo: "head"
+          }
+        ]
+      };
+    },
+    configureServer(server) {
+      server.middlewares.use("/__manus__/logs", (req, res, next) => {
+        if (req.method !== "POST") {
+          return next();
+        }
+        const handlePayload = (payload) => {
+          if (payload.consoleLogs?.length > 0) {
+            writeToLogFile("browserConsole", payload.consoleLogs);
+          }
+          if (payload.networkRequests?.length > 0) {
+            writeToLogFile("networkRequests", payload.networkRequests);
+          }
+          if (payload.sessionEvents?.length > 0) {
+            writeToLogFile("sessionReplay", payload.sessionEvents);
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true }));
+        };
+        const reqBody = req.body;
+        if (reqBody && typeof reqBody === "object") {
+          try {
+            handlePayload(reqBody);
+          } catch (e) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: String(e) }));
+          }
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => {
+          try {
+            const payload = JSON.parse(body);
+            handlePayload(payload);
+          } catch (e) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: false, error: String(e) }));
+          }
+        });
+      });
+    }
+  };
+}
+function vitePluginAnalyticsPlaceholder() {
+  return {
+    name: "analytics-placeholder",
+    enforce: "pre",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        const endpoint = process.env.VITE_ANALYTICS_ENDPOINT?.trim();
+        const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID?.trim();
+        if (endpoint && websiteId) {
+          return html.replaceAll("%VITE_ANALYTICS_ENDPOINT%", endpoint).replaceAll("%VITE_ANALYTICS_WEBSITE_ID%", websiteId);
+        }
+        return html.replace(
+          /\s*<script[^>]*src="(?:%VITE_ANALYTICS_ENDPOINT%|)\/umami"[^>]*>\s*<\/script>/g,
+          ""
+        );
+      }
+    }
+  };
+}
+var vite_config_default = defineConfig(({ mode }) => {
+  const isDev = mode !== "production";
+  const plugins = [
+    react(),
+    tailwindcss(),
+    jsxLocPlugin(),
+    ...isDev ? [vitePluginManusRuntime()] : [],
+    vitePluginAnalyticsPlaceholder(),
+    ...isDev ? [vitePluginManusDebugCollector()] : []
+  ];
+  return {
+    plugins,
+    resolve: {
+      alias: {
+        "@": path3.resolve(import.meta.dirname, "frontend", "src"),
+        "@shared": path3.resolve(import.meta.dirname, "shared"),
+        "@assets": path3.resolve(import.meta.dirname, "attached_assets")
+      }
+    },
+    envDir: path3.resolve(import.meta.dirname),
+    root: path3.resolve(import.meta.dirname, "frontend"),
+    publicDir: path3.resolve(import.meta.dirname, "frontend", "public"),
+    build: {
+      outDir: path3.resolve(import.meta.dirname, "dist/public"),
+      emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return void 0;
+            const normalizedId = id.replace(/\\/g, "/");
+            if (id.includes("jspdf") || id.includes("html2canvas")) return "vendor-pdf";
+            if (id.includes("@trpc") || id.includes("@tanstack/react-query") || id.includes("superjson")) return "vendor-data";
+            if (normalizedId.includes("/node_modules/react/") || normalizedId.includes("/node_modules/react-dom/") || normalizedId.includes("/node_modules/scheduler/") || normalizedId.includes("/node_modules/wouter/")) return "vendor-react";
+            if (normalizedId.includes("/node_modules/@radix/")) return "vendor-ui";
+            if (id.includes("lucide-react")) return "vendor-icons";
+            return void 0;
+          }
+        }
+      }
+    },
+    server: {
+      port: 3e3,
+      host: true,
+      allowedHosts: [
+        ".manuspre.computer",
+        ".manus.computer",
+        ".manus-asia.computer",
+        ".manuscomputer.ai",
+        ".manusvm.computer",
+        "localhost",
+        "127.0.0.1"
+      ],
+      fs: {
+        strict: true,
+        deny: ["**/.*"]
+      }
+    }
+  };
+});
+
+// shared/publicRouteMetadata.ts
+var defaultRouteMetadata = {
+  title: "AASW Foundation | NGO for Women Empowerment in Uttar Pradesh",
+  description: "Fueling women's success through tech & enterprise \u2014 AASW Foundation is a registered NGO in Uttar Pradesh: 800+ women trained, 300+ businesses launched or scaled, 30+ eco-friendly projects across 5 districts."
+};
+var routeMetadata = {
+  "/about": { title: "About AASW Foundation | Purpose, people and public trust", description: "Learn about AASW Foundation\u2019s purpose, approach, people and public commitment in Uttar Pradesh." },
+  "/who-we-are": { title: "Who We Are | AASW Foundation", description: "Meet AASW Foundation and learn how the organisation supports women and communities in Uttar Pradesh." },
+  "/vision-mission": { title: "Vision and Mission | AASW Foundation", description: "Read AASW Foundation\u2019s vision for women\u2019s leadership, digital capability and sustainable enterprise." },
+  "/what-we-do": { title: "What We Do | AASW Foundation", description: "Explore AASW Foundation\u2019s work in digital skills, green entrepreneurship, mentorship and community learning." },
+  "/digital-skills": { title: "Digital Skills Programme | AASW Foundation", description: "Learn about digital skills and enterprise training for women through AASW Foundation." },
+  "/green-entrepreneurship": { title: "Green Entrepreneurship | AASW Foundation", description: "Explore AASW Foundation\u2019s support for ecologically responsible enterprise and sustainable livelihoods." },
+  "/mentorship-community": { title: "Mentorship and Community | AASW Foundation", description: "Discover AASW Foundation\u2019s mentorship, workshops and peer support for women entrepreneurs." },
+  "/programs": { title: "AASW Foundation Programmes | Capability in practice", description: "Explore AASW Foundation programmes in digital capability, green enterprise, mentorship and community support." },
+  "/team": { title: "Our Team | AASW Foundation", description: "Meet the source-backed leadership, advisory and training team behind AASW Foundation." },
+  "/reports": { title: "Reports | AASW Foundation", description: "Read AASW Foundation\u2019s public reports and request organisational information." },
+  "/governance": { title: "Governance | AASW Foundation", description: "Learn about AASW Foundation\u2019s advisory structure, governance approach and public policies." },
+  "/stories": { title: "Stories and Impact | AASW Foundation", description: "Explore AASW Foundation\u2019s work and public impact supporting women and communities." },
+  "/updates": { title: "Updates | AASW Foundation", description: "Read the latest programme and community updates from AASW Foundation." },
+  "/membership": { title: "Membership | AASW Foundation", description: "Apply for AASW Foundation membership and stay connected to practical support, learning and community." },
+  "/volunteer": { title: "Volunteer | AASW Foundation", description: "Volunteer with AASW Foundation and support digital education, green entrepreneurship and community work in Uttar Pradesh." },
+  "/donate": { title: "Donate | Support AASW Foundation", description: "Support AASW Foundation\u2019s work with women through digital education, enterprise and community support." },
+  "/contact": { title: "Contact AASW Foundation | Get in touch", description: "Contact AASW Foundation for programme questions, partnerships, membership, donations or support enquiries." },
+  "/contact-us": { title: "Contact AASW Foundation | Get in touch", description: "Contact AASW Foundation for programme questions, partnerships, membership, donations or support enquiries." },
+  "/faq": { title: "FAQ | AASW Foundation", description: "Frequently asked questions about AASW Foundation donations, membership, volunteering and transparency." },
+  "/media-centre": { title: "Media Centre | AASW Foundation", description: "Read AASW Foundation updates, field notes and public information." },
+  "/field-gallery": { title: "Field Gallery | AASW Foundation", description: "View Foundation-approved field photographs from AASW work and community activity." },
+  "/privacy": { title: "Privacy Policy | AASW Foundation", description: "Read how AASW Foundation handles information submitted through this website." },
+  "/refund": { title: "Refund Policy | AASW Foundation", description: "Read AASW Foundation\u2019s membership fee refund and cancellation information." },
+  "/thank-you": { title: "Thank You | AASW Foundation", description: "Thank you for connecting with AASW Foundation.", indexable: false },
+  "/404": { title: "Page Not Found | AASW Foundation", description: "The page you requested could not be found.", indexable: false }
+};
+var privateRoutePaths = /* @__PURE__ */ new Set([
+  "/member",
+  "/member/login",
+  "/member/setup-password",
+  "/member/reset-password",
+  "/member/dashboard",
+  "/member/projects",
+  "/member/discover",
+  "/member/programmes",
+  "/member/membership",
+  "/member/profile",
+  "/member/history",
+  "/member/services",
+  "/member/password",
+  "/member/email-certificate",
+  "/member/certificate",
+  "/foundation-admin",
+  "/foundation-admin/login",
+  "/foundation-admin/documents",
+  "/foundation-admin/members",
+  "/foundation-admin/service-requests",
+  "/foundation-admin/support-inbox",
+  "/mis/dashboard",
+  "/mis/projects",
+  "/mis/delivery",
+  "/mis/operations",
+  "/mis/governance"
+]);
+function normalizeRoutePath(path5) {
+  const pathname = path5.split(/[?#]/, 1)[0] || "/";
+  return pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+}
+function isPrivateRoute(path5) {
+  const pathname = normalizeRoutePath(path5);
+  return pathname === "/member" || pathname.startsWith("/member/") || pathname === "/foundation-admin" || pathname.startsWith("/foundation-admin/") || pathname === "/mis" || pathname.startsWith("/mis/");
+}
+function isKnownRoute(path5) {
+  const pathname = normalizeRoutePath(path5);
+  return pathname === "/" || pathname === "/404" || Object.hasOwn(routeMetadata, pathname) || privateRoutePaths.has(pathname);
+}
+function isNotFoundRoute(path5) {
+  const pathname = normalizeRoutePath(path5);
+  return pathname === "/404" || !isKnownRoute(pathname);
+}
+function getRouteMetadata(path5) {
+  const pathname = normalizeRoutePath(path5);
+  if (isPrivateRoute(pathname)) return { title: "Secure Workspace | AASW Foundation", description: "Secure member and staff workspace for AASW Foundation.", indexable: false };
+  return routeMetadata[pathname] ?? (pathname === "/" ? defaultRouteMetadata : { title: "Page Not Found | AASW Foundation", description: "The page you requested could not be found.", indexable: false });
+}
+
+// backend/_core/routeHtml.ts
+function escapeHtml9(value) {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+function renderRouteHtml(template, requestPath, origin) {
+  const pathname = normalizeRoutePath(requestPath);
+  const metadata = getRouteMetadata(pathname);
+  const canonicalUrl = new URL(pathname, `${origin.replace(/\/+$/, "")}/`).toString();
+  const replacements = [
+    [/<title>[^<]*<\/title>/i, `<title>${escapeHtml9(metadata.title)}</title>`],
+    [/<meta\s+name="description"\s+content="[^"]*"\s*\/?\s*>/i, `<meta name="description" content="${escapeHtml9(metadata.description)}" />`],
+    [/<meta\s+name="robots"\s+content="[^"]*"\s*\/?\s*>/i, `<meta name="robots" content="${metadata.indexable === false ? "noindex,follow" : "index,follow"}" />`],
+    [/<meta\s+property="og:title"\s+content="[^"]*"\s*\/?\s*>/i, `<meta property="og:title" content="${escapeHtml9(metadata.title)}" />`],
+    [/<meta\s+property="og:description"\s+content="[^"]*"\s*\/?\s*>/i, `<meta property="og:description" content="${escapeHtml9(metadata.description)}" />`],
+    [/<meta\s+property="og:url"\s+content="[^"]*"\s*\/?\s*>/i, `<meta property="og:url" content="${escapeHtml9(canonicalUrl)}" />`],
+    [/<link\s+rel="canonical"\s+href="[^"]*"\s*\/?\s*>/i, `<link rel="canonical" href="${escapeHtml9(canonicalUrl)}" />`]
+  ];
+  return replacements.reduce((html, [pattern, replacement]) => html.replace(pattern, replacement), template);
+}
+function routeHttpStatus(requestPath) {
+  return isNotFoundRoute(requestPath) ? 404 : 200;
+}
+
+// backend/_core/vite.ts
+function resolveViteConfig() {
+  const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+  return typeof vite_config_default === "function" ? vite_config_default({ mode }) : vite_config_default;
+}
+async function setupVite(app, server, port) {
+  const serverOptions = {
+    middlewareMode: true,
+    hmr: { server, ...port ? { clientPort: port } : {} },
+    allowedHosts: true
+  };
+  const vite = await createViteServer({
+    ...resolveViteConfig(),
+    configFile: false,
+    server: serverOptions,
+    appType: "custom"
+  });
+  app.use(vite.middlewares);
+  app.use("*", async (req, res, next) => {
+    const url = req.originalUrl;
+    try {
+      const clientTemplate = path4.resolve(
+        import.meta.dirname,
+        "../..",
+        "frontend",
+        "index.html"
+      );
+      let template = await fs4.promises.readFile(clientTemplate, "utf-8");
+      template = template.replace(
+        `src="/src/main.tsx"`,
+        `src="/src/main.tsx?v=${nanoid8()}"`
+      );
+      const page = await vite.transformIndexHtml(url, template);
+      const routeHtml = renderRouteHtml(page, req.originalUrl, publicSiteOrigin({ protocol: req.protocol, host: req.get("host") }));
+      res.status(routeHttpStatus(req.originalUrl)).set({ "Content-Type": "text/html" }).end(routeHtml);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+}
+function serveStatic(app) {
+  const distPath = process.env.NODE_ENV === "development" ? path4.resolve(import.meta.dirname, "../..", "dist", "public") : path4.resolve(import.meta.dirname, "public");
+  if (!fs4.existsSync(distPath)) {
+    console.error(
+      `Could not find the build directory: ${distPath}, make sure to build the client first`
+    );
+  }
+  app.use(
+    "/assets",
+    express2.static(path4.join(distPath, "assets"), {
+      fallthrough: false,
+      maxAge: "365d",
+      immutable: true
     })
   );
+  app.get("/favicon.ico", (_req, res) => {
+    res.redirect(302, "/manus-storage/aasw-foundation-official-logo_41a4007d.png");
+  });
+  app.use(express2.static(distPath));
+  app.use("*", (req, res) => {
+    const pathname = req.originalUrl?.split("?")[0] ?? "";
+    if (path4.extname(pathname)) {
+      res.status(404).type("text/plain").send("Not found");
+      return;
+    }
+    fs4.promises.readFile(path4.resolve(distPath, "index.html"), "utf8").then((template) => {
+      const origin = process.env.APP_URL?.trim() || `${req.protocol}://${req.get("host") || "localhost:3000"}`;
+      res.status(routeHttpStatus(pathname)).type("html").send(renderRouteHtml(template, pathname, origin));
+    }).catch(() => res.status(500).type("text/plain").send("Unable to load the application shell"));
+  });
+}
+
+// backend/_core/index.ts
+function isMysqlListening(port = 3306, host = "127.0.0.1") {
+  return new Promise((resolve2) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1e3);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve2(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve2(false);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve2(false);
+    });
+    socket.connect(port, host);
+  });
+}
+function isPortAvailable(port) {
+  return new Promise((resolve2) => {
+    const server = net.createServer();
+    server.listen({ port, host: "0.0.0.0" }, () => server.close(() => resolve2(true)));
+    server.on("error", () => resolve2(false));
+  });
+}
+async function findAvailablePort(startPort = 3e3) {
+  for (let port = startPort; port < startPort + 20; port++) {
+    if (await isPortAvailable(port)) return port;
+  }
+  throw new Error(`No available port found starting from ${startPort}`);
+}
+async function ensureDatabaseRunning() {
+  if (await isMysqlListening(3306)) {
+    console.log("[AutoDB] Local MySQL is active on 127.0.0.1:3306.");
+    return;
+  }
+  console.log("[AutoDB] Local MySQL is not running on 3306. Auto-booting persistent database...");
+  try {
+    const { spawn } = await import("child_process");
+    const path5 = await import("path");
+    const fs5 = await import("fs");
+    const storeRoot = path5.resolve(process.cwd(), ".local-mysql");
+    const binary = path5.join(storeRoot, "binaries", "9.7.2", "mysql", "bin", process.platform === "win32" ? "mysqld.exe" : "mysqld");
+    const dataDir = path5.join(storeRoot, "data");
+    const initFile = path5.join(storeRoot, "init.sql");
+    if (fs5.existsSync(binary) && fs5.existsSync(dataDir)) {
+      const serverArgs = [
+        "--no-defaults",
+        "--port=3306",
+        `--datadir=${dataDir}`,
+        "--bind-address=127.0.0.1",
+        "--default-time-zone=+00:00",
+        "--console"
+      ];
+      if (fs5.existsSync(initFile)) {
+        serverArgs.push(`--init-file=${initFile}`);
+      }
+      const dbProc = spawn(binary, serverArgs, {
+        cwd: storeRoot,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      });
+      dbProc.on("error", (error) => console.error("[AutoDB] mysqld could not start:", error));
+      dbProc.unref();
+    } else {
+      const scriptPath = path5.resolve(process.cwd(), "scripts/runPersistentDb.ts");
+      const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+      const dbProc = spawn(npxCmd, ["tsx", scriptPath], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true
+      });
+      dbProc.on("error", (error) => console.error("[AutoDB] Database bootstrap could not start:", error));
+      dbProc.unref();
+    }
+    for (let i = 0; i < 60; i++) {
+      await new Promise((resolve2) => setTimeout(resolve2, 500));
+      if (await isMysqlListening(3306)) {
+        console.log("[AutoDB] Local MySQL is UP on 127.0.0.1:3306.");
+        return;
+      }
+    }
+    console.warn("[AutoDB] Warning: MySQL did not respond on 3306 within 30s.");
+  } catch (error) {
+    console.error("[AutoDB] Failed to auto-start MySQL:", error);
+  }
+}
+async function startServer() {
+  await ensureDatabaseRunning();
+  const app = createApiApp();
+  const server = createServer(app);
+  const preferredPort = parseInt(process.env.PORT || "3000", 10);
+  const port = await findAvailablePort(preferredPort);
+  if (port !== preferredPort) console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
+    await setupVite(app, server, port);
   } else {
     serveStatic(app);
-  }
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
   server.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${port}/ (or http://127.0.0.1:${port}/)`);
@@ -5719,10 +6017,6 @@ async function startServer() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
-process.on("unhandledRejection", (reason) => {
-  console.error("[UnhandledRejection]", reason);
-});
-process.on("uncaughtException", (error) => {
-  console.error("[UncaughtException]", error);
-});
+process.on("unhandledRejection", (reason) => console.error("[UnhandledRejection]", reason));
+process.on("uncaughtException", (error) => console.error("[UncaughtException]", error));
 startServer().catch(console.error);
