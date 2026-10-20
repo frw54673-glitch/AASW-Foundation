@@ -8,7 +8,7 @@ const appSource = readFileSync(resolve(projectRoot, "frontend/src/App.tsx"), "ut
 const publicRouteMetadataSource = readFileSync(resolve(projectRoot, "shared/publicRouteMetadata.ts"), "utf8");
 const homeSource = readFileSync(resolve(projectRoot, "frontend/src/pages/Home.tsx"), "utf8");
 const robotsSource = readFileSync(resolve(projectRoot, "frontend/public/robots.txt"), "utf8");
-const serverSource = readFileSync(resolve(projectRoot, "backend/_core/index.ts"), "utf8");
+const serverSource = readFileSync(resolve(projectRoot, "backend/_core/app.ts"), "utf8");
 const sitemapSource = readFileSync(resolve(projectRoot, "backend/_core/sitemap.ts"), "utf8");
 const viteSource = readFileSync(resolve(projectRoot, "vite.config.ts"), "utf8");
 

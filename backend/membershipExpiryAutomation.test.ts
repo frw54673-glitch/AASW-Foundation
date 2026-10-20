@@ -10,7 +10,7 @@ const memberSession = readFileSync(resolve(process.cwd(), "backend/security/memb
 const scheduler = readFileSync(resolve(process.cwd(), "backend/scheduled/membershipExpiry.ts"), "utf8");
 const reminderScheduler = readFileSync(resolve(process.cwd(), "backend/scheduled/membershipReminder.ts"), "utf8");
 const reminderEmail = readFileSync(resolve(process.cwd(), "backend/email/memberActivation.ts"), "utf8");
-const server = readFileSync(resolve(process.cwd(), "backend/_core/index.ts"), "utf8");
+const server = readFileSync(resolve(process.cwd(), "backend/_core/app.ts"), "utf8");
 const memberPortal = readFileSync(resolve(process.cwd(), "frontend/src/pages/MemberSidebarDashboard.tsx"), "utf8");
 
 describe("membership expiry automation", () => {
