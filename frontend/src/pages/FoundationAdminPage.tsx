@@ -58,12 +58,8 @@ function AdminWorkspace() {
   const failure = summary.error || alerts.error;
   if (loading) return <LoadingState />;
   if (failure) return <ErrorState message={failure.message} onRetry={reload} />;
-  // A failed record list degrades to that section's empty state instead of
-  // taking the whole workspace down.
-  const recordQueries = [memberships, inquiries, donations, payments, media, driveConfig, volunteers, refunds];
-  if (recordQueries.some(query => query.isError)) {
-    return <ErrorState message="Some record sections could not load. Refresh to try again." onRetry={reload} />;
-  }
+  // Record sections degrade to each section's own empty state independently
+  // instead of taking the whole workspace down.
   const submitMedia = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); const file = form.get("image"); const displayOrder = Number(form.get("displayOrder") || 0); if (!(file instanceof File) || !file.size) return report("error", "Choose a JPG, PNG or WebP field photo.", "Image required"); if (!(["image/jpeg", "image/png", "image/webp"] as string[]).includes(file.type) || file.size > 8 * 1024 * 1024) return report("error", "Use a JPG, PNG or WebP image up to 8 MB.", "Image rejected"); if (!Number.isInteger(displayOrder) || displayOrder < 0 || displayOrder > 9999) return report("error", "Gallery order must be a whole number from 0 to 9999.", "Gallery order invalid"); try { await mediaUpload.mutateAsync({ title: text(form, "title"), description: text(form, "description"), altText: text(form, "altText"), quarter: text(form, "quarter"), displayOrder, status: text(form, "status") as "draft" | "published", image: { originalName: file.name, mimeType: file.type as "image/jpeg" | "image/png" | "image/webp", dataBase64: await asBase64(file) } }); event.currentTarget.reset(); } catch { /* mutation notifier already explains the error */ } };
   const submitDrive = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); saveDrive.mutate({ folderUrl: text(form, "folderUrl"), syncIntervalHours: Number(form.get("syncIntervalHours") || 24) }); };
   const cards = [{ label: "Membership applications", value: summary.data?.memberships ?? 0, icon: Users }, { label: "Unread approval alerts", value: summary.data?.unreadAdminAlerts ?? 0, icon: BellRing }, { label: "Programme requests to review", value: summary.data?.programmeRequests ?? 0, icon: ClipboardList }, { label: "Payouts awaiting settlement", value: summary.data?.payoutQueue ?? 0, icon: HandCoins }, { label: "Volunteer applications", value: summary.data?.volunteers ?? 0, icon: HandHeart }, { label: "Contact inquiries", value: summary.data?.inquiries ?? 0, icon: Inbox }, { label: "Donation details", value: summary.data?.donations ?? 0, icon: HandCoins }, { label: "Published gallery images", value: summary.data?.publishedMedia ?? 0, icon: FileImage }];

@@ -1006,13 +1006,13 @@ async function createMembershipApplicationWithActivation(input) {
 }
 async function getMemberByIdentifier(identifier) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member access.");
+  if (!db) return void 0;
   const rows = await db.select().from(members).where(or(eq(members.email, identifier.toLowerCase()), eq(members.membershipNo, identifier.toUpperCase()))).limit(1);
   return rows[0];
 }
 async function getMemberById(memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member access.");
+  if (!db) return void 0;
   const rows = await db.select().from(members).where(eq(members.id, memberId)).limit(1);
   return rows[0];
 }
@@ -1042,12 +1042,12 @@ async function expireDueMemberships(now = /* @__PURE__ */ new Date()) {
 }
 async function listMemberMembershipCycles(memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member membership history.");
+  if (!db) return [];
   return db.select({ cycleNumber: memberMembershipCycles.cycleNumber, membershipType: memberMembershipCycles.membershipType, startsOn: memberMembershipCycles.startsOn, expiresOn: memberMembershipCycles.expiresOn, status: memberMembershipCycles.status, expiredAt: memberMembershipCycles.expiredAt, createdAt: memberMembershipCycles.createdAt }).from(memberMembershipCycles).where(eq(memberMembershipCycles.memberId, memberId)).orderBy(desc(memberMembershipCycles.cycleNumber));
 }
 async function getMembershipExpiryAutomationByTaskUid(taskUid) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for membership expiry automation.");
+  if (!db) return void 0;
   const [config] = await db.select().from(membershipExpiryAutomation).where(eq(membershipExpiryAutomation.scheduleCronTaskUid, taskUid)).limit(1);
   return config;
 }
@@ -1216,7 +1216,7 @@ async function resetMemberPasswordFromToken(input) {
 }
 async function listMemberProjectAssignments(memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member projects.");
+  if (!db) return [];
   return db.select({ assignmentId: memberProjectAssignments.id, projectRole: memberProjectAssignments.projectRole, assignedAt: memberProjectAssignments.assignedAt, projectId: projects.id, projectCode: projects.projectCode, projectName: projects.projectName, projectTheme: projects.projectTheme, projectLocation: projects.projectLocation, projectStatus: projects.projectStatus, startDate: projects.startDate, endDate: projects.endDate }).from(memberProjectAssignments).innerJoin(projects, eq(memberProjectAssignments.projectId, projects.id)).where(and(eq(memberProjectAssignments.memberId, memberId), eq(memberProjectAssignments.assignmentStatus, "active"))).orderBy(desc(memberProjectAssignments.assignedAt));
 }
 async function createMemberServiceRequest(input) {
@@ -1238,12 +1238,12 @@ async function createMemberServiceRequest(input) {
 }
 async function listMemberServiceRequests(memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member service requests.");
+  if (!db) return [];
   return db.select({ requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, projectId: memberServiceRequests.projectId, projectCode: projects.projectCode, projectName: projects.projectName, message: memberServiceRequests.message, status: memberServiceRequests.status, adminNote: memberServiceRequests.adminNote, reviewedAt: memberServiceRequests.reviewedAt, createdAt: memberServiceRequests.createdAt, updatedAt: memberServiceRequests.updatedAt }).from(memberServiceRequests).leftJoin(projects, eq(memberServiceRequests.projectId, projects.id)).where(eq(memberServiceRequests.memberId, memberId)).orderBy(desc(memberServiceRequests.createdAt));
 }
 async function listFoundationMemberServiceRequests(limit) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation service requests.");
+  if (!db) return [];
   return db.select({ requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, projectId: memberServiceRequests.projectId, projectCode: projects.projectCode, projectName: projects.projectName, message: memberServiceRequests.message, status: memberServiceRequests.status, adminNote: memberServiceRequests.adminNote, reviewedAt: memberServiceRequests.reviewedAt, createdAt: memberServiceRequests.createdAt, fullName: members.fullName, membershipNo: members.membershipNo, email: members.email }).from(memberServiceRequests).innerJoin(members, eq(memberServiceRequests.memberId, members.id)).leftJoin(projects, eq(memberServiceRequests.projectId, projects.id)).orderBy(desc(memberServiceRequests.createdAt)).limit(limit);
 }
 async function updateMemberServiceRequestStatus(input) {
@@ -1253,19 +1253,19 @@ async function updateMemberServiceRequestStatus(input) {
 }
 async function getMemberServiceRequestByRefAndMember(requestRef, memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member service requests.");
+  if (!db) return null;
   const [request] = await db.select().from(memberServiceRequests).where(and(eq(memberServiceRequests.requestRef, requestRef), eq(memberServiceRequests.memberId, memberId))).limit(1);
   return request ?? null;
 }
 async function getMemberServiceCompletionByRequest(requestId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for service completions.");
+  if (!db) return null;
   const [completion] = await db.select().from(memberServiceCompletions).where(eq(memberServiceCompletions.requestId, requestId)).limit(1);
   return completion ?? null;
 }
 async function countMemberServiceCompletionsByStatus() {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation service completions.");
+  if (!db) return { submitted: 0, verified: 0, rejected: 0, paid: 0, verifiedPayoutPaise: 0, paidPayoutPaise: 0, settledByProgramme: [] };
   const [rows, programmeRows] = await Promise.all([
     db.select({ status: memberServiceCompletions.status, total: count(), payoutTotal: sum(memberServiceCompletions.payoutAmount) }).from(memberServiceCompletions).groupBy(memberServiceCompletions.status),
     db.select({ serviceType: memberServiceRequests.serviceType, settled: count(), settledPaise: sum(memberServiceCompletions.payoutAmount) }).from(memberServiceCompletions).innerJoin(memberServiceRequests, eq(memberServiceCompletions.requestId, memberServiceRequests.id)).where(eq(memberServiceCompletions.status, "paid")).groupBy(memberServiceRequests.serviceType)
@@ -1281,13 +1281,13 @@ async function countMemberServiceCompletionsByStatus() {
 }
 async function listMemberCompletionActivity(limit = 12) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation service completions.");
+  if (!db) return [];
   const rows = await db.select({ completionRef: memberServiceCompletions.completionRef, serviceType: memberServiceRequests.serviceType, fullName: members.fullName, membershipNo: members.membershipNo, payoutAmount: memberServiceCompletions.payoutAmount, payoutMethod: memberServiceCompletions.payoutMethod, payoutReference: memberServiceCompletions.payoutReference, verifiedAt: memberServiceCompletions.verifiedAt, paidAt: memberServiceCompletions.paidAt, updatedAt: memberServiceCompletions.updatedAt, createdAt: memberServiceCompletions.createdAt }).from(memberServiceCompletions).innerJoin(memberServiceRequests, eq(memberServiceCompletions.requestId, memberServiceRequests.id)).innerJoin(members, eq(memberServiceCompletions.memberId, members.id)).orderBy(desc(memberServiceCompletions.updatedAt)).limit(limit);
   return rows;
 }
 async function listFoundationMemberServiceCompletions(limit, status) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation service completions.");
+  if (!db) return [];
   const rows = status ? await db.select({ id: memberServiceCompletions.id, completionRef: memberServiceCompletions.completionRef, requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, memberId: memberServiceCompletions.memberId, details: memberServiceCompletions.details, driveLink: memberServiceCompletions.driveLink, status: memberServiceCompletions.status, rejectionReason: memberServiceCompletions.rejectionReason, payoutUpiId: memberServiceCompletions.payoutUpiId, payoutAccountName: memberServiceCompletions.payoutAccountName, payoutAccountNumber: memberServiceCompletions.payoutAccountNumber, payoutIfsc: memberServiceCompletions.payoutIfsc, payoutAmount: memberServiceCompletions.payoutAmount, payoutMethod: memberServiceCompletions.payoutMethod, payoutReference: memberServiceCompletions.payoutReference, payoutNote: memberServiceCompletions.payoutNote, verifiedAt: memberServiceCompletions.verifiedAt, paidAt: memberServiceCompletions.paidAt, createdAt: memberServiceCompletions.createdAt, updatedAt: memberServiceCompletions.updatedAt, fullName: members.fullName, membershipNo: members.membershipNo, email: members.email }).from(memberServiceCompletions).innerJoin(memberServiceRequests, eq(memberServiceCompletions.requestId, memberServiceRequests.id)).innerJoin(members, eq(memberServiceCompletions.memberId, members.id)).where(eq(memberServiceCompletions.status, status)).orderBy(desc(memberServiceCompletions.updatedAt)).limit(limit) : await db.select({ id: memberServiceCompletions.id, completionRef: memberServiceCompletions.completionRef, requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, memberId: memberServiceCompletions.memberId, details: memberServiceCompletions.details, driveLink: memberServiceCompletions.driveLink, status: memberServiceCompletions.status, rejectionReason: memberServiceCompletions.rejectionReason, payoutUpiId: memberServiceCompletions.payoutUpiId, payoutAccountName: memberServiceCompletions.payoutAccountName, payoutAccountNumber: memberServiceCompletions.payoutAccountNumber, payoutIfsc: memberServiceCompletions.payoutIfsc, payoutAmount: memberServiceCompletions.payoutAmount, payoutMethod: memberServiceCompletions.payoutMethod, payoutReference: memberServiceCompletions.payoutReference, payoutNote: memberServiceCompletions.payoutNote, verifiedAt: memberServiceCompletions.verifiedAt, paidAt: memberServiceCompletions.paidAt, createdAt: memberServiceCompletions.createdAt, updatedAt: memberServiceCompletions.updatedAt, fullName: members.fullName, membershipNo: members.membershipNo, email: members.email }).from(memberServiceCompletions).innerJoin(memberServiceRequests, eq(memberServiceCompletions.requestId, memberServiceRequests.id)).innerJoin(members, eq(memberServiceCompletions.memberId, members.id)).orderBy(desc(memberServiceCompletions.updatedAt)).limit(limit);
   if (!rows.length) return [];
   const proofRows = await db.select({ completionId: memberServiceCompletionProofs.completionId, storageKey: memberServiceCompletionProofs.storageKey, originalName: memberServiceCompletionProofs.originalName, mimeType: memberServiceCompletionProofs.mimeType, fileSize: memberServiceCompletionProofs.fileSize }).from(memberServiceCompletionProofs).where(inArray(memberServiceCompletionProofs.completionId, rows.map((row) => row.id)));
@@ -1352,7 +1352,7 @@ async function createCompletionSubmittedAdminAlert(input) {
 }
 async function listMemberServiceCompletions(memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for service completions.");
+  if (!db) return [];
   const rows = await db.select({ id: memberServiceCompletions.id, completionRef: memberServiceCompletions.completionRef, requestId: memberServiceCompletions.requestId, requestRef: memberServiceRequests.requestRef, serviceType: memberServiceRequests.serviceType, details: memberServiceCompletions.details, driveLink: memberServiceCompletions.driveLink, status: memberServiceCompletions.status, rejectionReason: memberServiceCompletions.rejectionReason, payoutUpiId: memberServiceCompletions.payoutUpiId, payoutAccountName: memberServiceCompletions.payoutAccountName, payoutAccountNumber: memberServiceCompletions.payoutAccountNumber, payoutIfsc: memberServiceCompletions.payoutIfsc, payoutAmount: memberServiceCompletions.payoutAmount, payoutMethod: memberServiceCompletions.payoutMethod, payoutReference: memberServiceCompletions.payoutReference, payoutNote: memberServiceCompletions.payoutNote, verifiedAt: memberServiceCompletions.verifiedAt, paidAt: memberServiceCompletions.paidAt, createdAt: memberServiceCompletions.createdAt, updatedAt: memberServiceCompletions.updatedAt }).from(memberServiceCompletions).innerJoin(memberServiceRequests, eq(memberServiceCompletions.requestId, memberServiceRequests.id)).where(eq(memberServiceCompletions.memberId, memberId)).orderBy(desc(memberServiceCompletions.updatedAt));
   if (!rows.length) return [];
   const proofRows = await db.select({ completionId: memberServiceCompletionProofs.completionId, originalName: memberServiceCompletionProofs.originalName, mimeType: memberServiceCompletionProofs.mimeType, fileSize: memberServiceCompletionProofs.fileSize, storageKey: memberServiceCompletionProofs.storageKey }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).where(inArray(memberServiceCompletions.id, rows.map((row) => row.id)));
@@ -1368,12 +1368,12 @@ async function createMemberSupportMessage(input) {
 }
 async function listMemberSupportMessages(memberId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member support messages.");
+  if (!db) return [];
   return db.select({ messageRef: memberSupportMessages.messageRef, message: memberSupportMessages.message, status: memberSupportMessages.status, adminReply: memberSupportMessages.adminReply, repliedAt: memberSupportMessages.repliedAt, createdAt: memberSupportMessages.createdAt, updatedAt: memberSupportMessages.updatedAt }).from(memberSupportMessages).where(eq(memberSupportMessages.memberId, memberId)).orderBy(asc(memberSupportMessages.createdAt));
 }
 async function listFoundationMemberSupportMessages(limit) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation support messages.");
+  if (!db) return [];
   return db.select({ messageRef: memberSupportMessages.messageRef, message: memberSupportMessages.message, status: memberSupportMessages.status, adminReply: memberSupportMessages.adminReply, repliedAt: memberSupportMessages.repliedAt, createdAt: memberSupportMessages.createdAt, fullName: members.fullName, membershipNo: members.membershipNo, email: members.email }).from(memberSupportMessages).innerJoin(members, eq(memberSupportMessages.memberId, members.id)).orderBy(desc(memberSupportMessages.updatedAt)).limit(limit);
 }
 async function respondToMemberSupportMessage(input) {
@@ -1384,12 +1384,12 @@ async function respondToMemberSupportMessage(input) {
 }
 async function listMembersForAdmin(limit = 200) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member administration.");
+  if (!db) return [];
   return db.select({ id: members.id, membershipNo: members.membershipNo, fullName: members.fullName, email: members.email, memberType: members.memberType, role: members.role, status: members.status, accountStatus: members.accountStatus, joiningDate: members.joiningDate, lastLogin: members.lastLogin }).from(members).orderBy(desc(members.createdAt)).limit(limit);
 }
 async function listMembersWithProgrammeProfile(limit = 200) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member administration.");
+  if (!db) return [];
   const memberRows = await db.select({ id: members.id, membershipNo: members.membershipNo, fullName: members.fullName, email: members.email, memberType: members.memberType, role: members.role, status: members.status, accountStatus: members.accountStatus, joiningDate: members.joiningDate, lastLogin: members.lastLogin }).from(members).orderBy(desc(members.createdAt)).limit(limit);
   if (!memberRows.length) return [];
   const ids = memberRows.map((row) => row.id);
@@ -1489,7 +1489,7 @@ async function markMembershipApplicationNotification(applicationRef, status, err
 }
 async function getPaymentTransactionByGatewayOrderId(gatewayOrderId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for payment lookup.");
+  if (!db) return void 0;
   const rows = await db.select().from(paymentTransactions).where(eq(paymentTransactions.gatewayOrderId, gatewayOrderId)).limit(1);
   return rows[0];
 }
@@ -1505,7 +1505,7 @@ async function markPaymentTransactionRefundedByPaymentId(gatewayPaymentId, gatew
 }
 async function getPaymentTransactionByReceipt(receipt) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for payment lookup.");
+  if (!db) return void 0;
   const rows = await db.select().from(paymentTransactions).where(eq(paymentTransactions.receipt, receipt)).limit(1);
   return rows[0];
 }
@@ -1576,13 +1576,13 @@ async function markPaymentRefundProcessed(gatewayRefundId, now = /* @__PURE__ */
 }
 async function getPaymentRefundByGatewayRefundId(gatewayRefundId) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for refund lookup.");
+  if (!db) return void 0;
   const rows = await db.select().from(paymentRefunds).where(eq(paymentRefunds.gatewayRefundId, gatewayRefundId)).limit(1);
   return rows[0];
 }
 async function getPaymentRefundsByReceipt(receipt) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for refund lookup.");
+  if (!db) return [];
   return db.select({ refundRef: paymentRefunds.refundRef, status: paymentRefunds.status, amount: paymentRefunds.amount, gatewayRefundId: paymentRefunds.gatewayRefundId }).from(paymentRefunds).where(and(eq(paymentRefunds.receipt, receipt), inArray(paymentRefunds.status, ["initiated", "processed"])));
 }
 async function markPaymentRefundFailed(gatewayRefundId, error, now = /* @__PURE__ */ new Date()) {
@@ -1597,7 +1597,7 @@ async function markPaymentRefundNotified(refundRef, status, error, now = /* @__P
 }
 async function listPaymentRefunds(limit) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for refund listing.");
+  if (!db) return [];
   return db.select({ refundRef: paymentRefunds.refundRef, receipt: paymentRefunds.receipt, amount: paymentRefunds.amount, status: paymentRefunds.status, reason: paymentRefunds.reason, notificationStatus: paymentRefunds.notificationStatus, processedAt: paymentRefunds.processedAt, createdAt: paymentRefunds.createdAt, supporterName: paymentTransactions.supporterName, supporterEmail: paymentTransactions.supporterEmail }).from(paymentRefunds).innerJoin(paymentTransactions, eq(paymentRefunds.receipt, paymentTransactions.receipt)).orderBy(desc(paymentRefunds.createdAt)).limit(limit);
 }
 async function createVolunteerApplication(application) {
@@ -1617,7 +1617,7 @@ async function markVolunteerDecisionNotification(applicationRef, status, error) 
 }
 async function listVolunteerApplications(limit, status) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for volunteer review.");
+  if (!db) return [];
   const selection = { applicationRef: volunteerApplications.applicationRef, fullName: volunteerApplications.fullName, email: volunteerApplications.email, phone: volunteerApplications.phone, city: volunteerApplications.city, state: volunteerApplications.state, skills: volunteerApplications.skills, availability: volunteerApplications.availability, interests: volunteerApplications.interests, message: volunteerApplications.message, status: volunteerApplications.status, reviewNotes: volunteerApplications.reviewNotes, notificationStatus: volunteerApplications.notificationStatus, decisionNotificationStatus: volunteerApplications.decisionNotificationStatus, reviewedAt: volunteerApplications.reviewedAt, createdAt: volunteerApplications.createdAt };
   const query = db.select(selection).from(volunteerApplications);
   if (status) return query.where(eq(volunteerApplications.status, status)).orderBy(desc(volunteerApplications.createdAt)).limit(limit);
@@ -1634,13 +1634,13 @@ async function updateVolunteerApplicationStatus(input) {
 }
 async function getVolunteerApplicationByRef(applicationRef) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for volunteer review.");
+  if (!db) return void 0;
   const rows = await db.select().from(volunteerApplications).where(eq(volunteerApplications.applicationRef, applicationRef)).limit(1);
   return rows[0];
 }
 async function listMemberPaymentReceipts(email, limit = 25) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member receipts.");
+  if (!db) return [];
   const payments = await db.select({ receipt: paymentTransactions.receipt, kind: paymentTransactions.kind, amount: paymentTransactions.amount, currency: paymentTransactions.currency, status: paymentTransactions.status, gatewayPaymentId: paymentTransactions.gatewayPaymentId, createdAt: paymentTransactions.createdAt }).from(paymentTransactions).where(eq(paymentTransactions.supporterEmail, email.toLowerCase())).orderBy(desc(paymentTransactions.createdAt)).limit(limit);
   return payments.map((row) => ({ ...row, kind: row.kind }));
 }
@@ -1649,7 +1649,7 @@ async function listMemberPaymentReceiptsWithPayouts(email, memberId, limit = 25)
     listMemberPaymentReceipts(email, limit),
     (async () => {
       const db = await getDb();
-      if (!db) throw new Error("Database is unavailable for member receipts.");
+      if (!db) return [];
       return db.select({ receipt: memberServiceCompletions.completionRef, amount: memberServiceCompletions.payoutAmount, reference: memberServiceCompletions.payoutReference, method: memberServiceCompletions.payoutMethod, upiId: memberServiceCompletions.payoutUpiId, accountNumber: memberServiceCompletions.payoutAccountNumber, paidAt: memberServiceCompletions.paidAt, programmeType: memberServiceRequests.serviceType }).from(memberServiceCompletions).innerJoin(memberServiceRequests, eq(memberServiceCompletions.requestId, memberServiceRequests.id)).where(and(eq(memberServiceCompletions.memberId, memberId), eq(memberServiceCompletions.status, "paid"))).orderBy(desc(memberServiceCompletions.paidAt)).limit(limit);
     })()
   ]);
@@ -1657,7 +1657,7 @@ async function listMemberPaymentReceiptsWithPayouts(email, memberId, limit = 25)
 }
 async function getMemberPaymentReceipt(receipt, email) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for member receipts.");
+  if (!db) return void 0;
   const rows = await db.select({ receipt: paymentTransactions.receipt, kind: paymentTransactions.kind, amount: paymentTransactions.amount, currency: paymentTransactions.currency, status: paymentTransactions.status, gatewayPaymentId: paymentTransactions.gatewayPaymentId, supporterName: paymentTransactions.supporterName, supporterEmail: paymentTransactions.supporterEmail, createdAt: paymentTransactions.createdAt }).from(paymentTransactions).where(and(eq(paymentTransactions.receipt, receipt), eq(paymentTransactions.supporterEmail, email.toLowerCase()))).limit(1);
   return rows[0];
 }
@@ -1715,20 +1715,20 @@ async function updateMembershipApplicationStatus(applicationRef, status) {
 }
 async function getMembershipApplicationProofKey(applicationRef) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  if (!db) return void 0;
   const rows = await db.select({ idProofStorageKey: membershipApplications.idProofStorageKey }).from(membershipApplications).where(eq(membershipApplications.applicationRef, applicationRef)).limit(1);
   return rows[0]?.idProofStorageKey;
 }
 async function listMemberDocumentRecords() {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  if (!db) return { membershipDocs: [], completionDocs: [] };
   const membershipDocs = await db.select({ kind: sql`'membership_proof'`.as("kind"), ref: membershipApplications.applicationRef, memberName: membershipApplications.fullName, membershipNo: sql`NULL`.as("membershipNo"), email: membershipApplications.email, fileName: membershipApplications.idProofOriginalName, mimeType: membershipApplications.idProofMimeType, storageKey: membershipApplications.idProofStorageKey, uploadedAt: membershipApplications.createdAt }).from(membershipApplications).orderBy(desc(membershipApplications.createdAt));
   const completionDocs = await db.select({ kind: sql`'completion_proof'`.as("kind"), ref: memberServiceCompletions.completionRef, memberName: members.fullName, membershipNo: members.membershipNo, email: members.email, fileName: memberServiceCompletionProofs.originalName, mimeType: memberServiceCompletionProofs.mimeType, storageKey: memberServiceCompletionProofs.storageKey, uploadedAt: memberServiceCompletionProofs.createdAt }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).innerJoin(members, eq(memberServiceCompletions.memberId, members.id)).orderBy(desc(memberServiceCompletionProofs.createdAt));
   return { membershipDocs, completionDocs };
 }
 async function getCompletionProofByRef(completionRef) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation management.");
+  if (!db) return void 0;
   const rows = await db.select({ storageKey: memberServiceCompletionProofs.storageKey, mimeType: memberServiceCompletionProofs.mimeType, originalName: memberServiceCompletionProofs.originalName }).from(memberServiceCompletionProofs).innerJoin(memberServiceCompletions, eq(memberServiceCompletionProofs.completionId, memberServiceCompletions.id)).where(eq(memberServiceCompletions.completionRef, completionRef)).limit(1);
   return rows[0];
 }
@@ -1781,7 +1781,7 @@ async function updateGalleryMedia(mediaRef, input) {
 }
 async function getGalleryDriveSyncConfig() {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Foundation Drive configuration.");
+  if (!db) return null;
   const [config] = await db.select().from(galleryDriveSync).orderBy(desc(galleryDriveSync.updatedAt)).limit(1);
   return config;
 }
@@ -1799,12 +1799,12 @@ async function saveGalleryDriveSyncConfig(input) {
 }
 async function listMisProjects(limit = 100) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return [];
   return db.select().from(projects).orderBy(desc(projects.createdAt)).limit(limit);
 }
 async function getMisProject(projectId4) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return void 0;
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId4)).limit(1);
   if (!project) return void 0;
   const [partners, objectives, targetGroups, activities] = await Promise.all([
@@ -1817,7 +1817,7 @@ async function getMisProject(projectId4) {
 }
 async function getNextProjectSequence() {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return 1;
   const [result] = await db.select({ total: count() }).from(projects);
   return Number(result?.total ?? 0) + 1;
 }
@@ -1853,19 +1853,19 @@ async function createMisActivity(input) {
 }
 async function getNextBeneficiarySequence() {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return 1;
   const [result] = await db.select({ total: count() }).from(beneficiaries);
   return Number(result?.total ?? 0) + 1;
 }
 async function getNextFieldEventSequence() {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return 1;
   const [result] = await db.select({ total: count() }).from(fieldEvents);
   return Number(result?.total ?? 0) + 1;
 }
 async function findDuplicateBeneficiary(input) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return [];
   return db.select({ id: beneficiaries.id, beneficiaryId: beneficiaries.beneficiaryId, projectId: beneficiaries.projectId }).from(beneficiaries).where(and(eq(beneficiaries.name, input.name), eq(beneficiaries.phoneNumber, input.phoneNumber), eq(beneficiaries.village, input.village))).limit(5);
 }
 async function createMisBeneficiary(input) {
@@ -1876,7 +1876,7 @@ async function createMisBeneficiary(input) {
 }
 async function listMisBeneficiaries(projectId4, limit = 100) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return [];
   const query = db.select().from(beneficiaries);
   return projectId4 ? query.where(eq(beneficiaries.projectId, projectId4)).orderBy(desc(beneficiaries.createdAt)).limit(limit) : query.orderBy(desc(beneficiaries.createdAt)).limit(limit);
 }
@@ -1906,7 +1906,7 @@ async function createMisOutcome(input) {
 }
 async function getMisDeliverySummary(projectId4) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return { beneficiaries: 0, fieldEvents: 0, targetRecords: 0, outputs: 0, outcomes: 0 };
   const [beneficiaryTotal, eventTotal, targetTotal, outputTotal, outcomeTotal] = await Promise.all([db.select({ total: count() }).from(beneficiaries).where(eq(beneficiaries.projectId, projectId4)), db.select({ total: count() }).from(fieldEvents).where(eq(fieldEvents.projectId, projectId4)), db.select({ total: count() }).from(targetsAchievement).where(eq(targetsAchievement.projectId, projectId4)), db.select({ total: count() }).from(projectOutputs).where(eq(projectOutputs.projectId, projectId4)), db.select({ total: count() }).from(projectOutcomes).where(eq(projectOutcomes.projectId, projectId4))]);
   return { beneficiaries: Number(beneficiaryTotal[0]?.total ?? 0), fieldEvents: Number(eventTotal[0]?.total ?? 0), targetRecords: Number(targetTotal[0]?.total ?? 0), outputs: Number(outputTotal[0]?.total ?? 0), outcomes: Number(outcomeTotal[0]?.total ?? 0) };
 }
@@ -1959,12 +1959,12 @@ async function createMisReport(input) {
 }
 async function listMisReports(limit = 100) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return [];
   return db.select().from(projectReports).orderBy(desc(projectReports.dueDate)).limit(limit);
 }
 async function listMisRisks(limit = 100) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return [];
   return db.select().from(projectRisks).orderBy(desc(projectRisks.updatedAt)).limit(limit);
 }
 async function createMisImpactEvidence(input) {
@@ -1985,7 +1985,7 @@ async function writeMisAuditLog(input) {
 }
 async function listMisAuditLogs(limit = 100) {
   const db = await getDb();
-  if (!db) throw new Error("Database is unavailable for Project MIS.");
+  if (!db) return [];
   return db.select().from(misAuditLogs).orderBy(desc(misAuditLogs.createdAt)).limit(limit);
 }
 function dateKey(value) {
