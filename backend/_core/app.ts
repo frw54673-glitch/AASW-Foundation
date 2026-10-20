@@ -1,6 +1,6 @@
 import "dotenv/config";
 import compression from "compression";
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { handleRazorpayWebhook } from "../payments/webhook";
@@ -26,22 +26,29 @@ export function createApiApp() {
   app.use(applyHttpSecurity);
 
   // Normalize URL for serverless environments (e.g. Vercel) where rewrites or proxying may adjust paths
-  app.use((req, _res, next) => {
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    const forwardedUri = req.headers["x-forwarded-uri"] as string | undefined;
     const matchedPath = req.headers["x-matched-path"] as string | undefined;
-    if (matchedPath && matchedPath.startsWith("/api")) {
-      req.url = matchedPath;
+    const isGenericApiEntry = req.url === "/api" || req.url === "/api/" || req.url.startsWith("/api/index");
+
+    if (isGenericApiEntry) {
+      if (forwardedUri && forwardedUri.startsWith("/api")) {
+        req.url = forwardedUri;
+      } else if (matchedPath && matchedPath.startsWith("/api") && !matchedPath.startsWith("/api/index") && matchedPath !== "/api") {
+        req.url = matchedPath;
+      }
     } else if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
       req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
     }
     next();
   });
 
-  app.get("/api/health", (_req, res) => res.json(backendHealth()));
-  app.get("/api/ready", (_req, res) => {
+  app.get("/api/health", (_req: Request, res: Response) => res.json(backendHealth()));
+  app.get("/api/ready", (_req: Request, res: Response) => {
     const readiness = backendReadiness();
     return res.status(readiness.ok ? 200 : 503).json(readiness);
   });
-  app.get("/sitemap.xml", (req, res) => {
+  app.get("/sitemap.xml", (req: Request, res: Response) => {
     res.type("application/xml").send(buildPublicSitemap(publicSiteOrigin({ protocol: req.protocol, host: req.get("host") })));
   });
 

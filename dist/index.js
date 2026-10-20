@@ -5486,9 +5486,15 @@ function createApiApp() {
   app.use(compression());
   app.use(applyHttpSecurity);
   app.use((req, _res, next) => {
+    const forwardedUri = req.headers["x-forwarded-uri"];
     const matchedPath = req.headers["x-matched-path"];
-    if (matchedPath && matchedPath.startsWith("/api")) {
-      req.url = matchedPath;
+    const isGenericApiEntry = req.url === "/api" || req.url === "/api/" || req.url.startsWith("/api/index");
+    if (isGenericApiEntry) {
+      if (forwardedUri && forwardedUri.startsWith("/api")) {
+        req.url = forwardedUri;
+      } else if (matchedPath && matchedPath.startsWith("/api") && !matchedPath.startsWith("/api/index") && matchedPath !== "/api") {
+        req.url = matchedPath;
+      }
     } else if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
       req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
     }
