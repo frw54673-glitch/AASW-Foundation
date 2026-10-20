@@ -16,6 +16,14 @@ const razorpayRefundSchema = z.object({
   payment_id: z.string().min(1),
 });
 
+const razorpayPaymentSchema = z.object({
+  id: z.string().min(1),
+  order_id: z.string().min(1),
+  amount: z.number().int().positive(),
+  currency: z.string().length(3),
+  status: z.string(),
+});
+
 export type RazorpayConfig = { keyId: string; keySecret: string };
 
 export function getRazorpayConfig(): RazorpayConfig | null {
@@ -62,6 +70,18 @@ export async function createRazorpayOrder(input: { amount: number; receipt: stri
   }
 
   return razorpayOrderSchema.parse(await response.json());
+}
+
+export async function fetchRazorpayPayment(paymentId: string): Promise<z.infer<typeof razorpayPaymentSchema>> {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(config.keyId + ":" + config.keySecret).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/payments/" + encodeURIComponent(paymentId), {
+    headers: { Authorization: "Basic " + authorization },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error("Razorpay payment lookup failed (" + response.status + ").");
+  return razorpayPaymentSchema.parse(await response.json());
 }
 
 export type RazorpayRefund = z.infer<typeof razorpayRefundSchema>;

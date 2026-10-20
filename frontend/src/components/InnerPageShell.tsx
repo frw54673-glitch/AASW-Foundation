@@ -96,7 +96,7 @@ export function InnerPageShell({ children, activePath, eyebrow, title, intro, ch
           <div className="footer-column footer-column-newsletter"><FooterNewsletterForm /></div><div className="footer-column"><span className="footer-label">Explore</span><a href="/about">About AASW</a><a href="/programs">Programmes</a><a href="/stories">Impact</a><a href="/reports">Reports</a></div>
           <div className="footer-column"><span className="footer-label">Reach us</span><a href={AASW_CONTACT.emailHref}><Mail size={15} />Email AASW</a><a href={AASW_CONTACT.primaryPhoneHref}><Phone size={15} />{AASW_CONTACT.primaryPhoneDisplay}</a><a href={AASW_CONTACT.secondaryPhoneHref}><Phone size={15} />{AASW_CONTACT.secondaryPhoneDisplay}</a><a href={AASW_CONTACT.mapsUrl} target="_blank" rel="noreferrer"><MapPin size={15} />{AASW_CONTACT.locationShort}<br /><small>Uttar Pradesh 209303</small></a></div>
         </div>
-        <div className="container footer-bottom"><span>© 2025 AASW Foundation. All rights reserved.</span><span>Aapka Apna Social Welfare Foundation</span></div>
+        <div className="container footer-bottom"><span>© {new Date().getFullYear()} AASW Foundation. All rights reserved.</span><span>Aapka Apna Social Welfare Foundation</span></div>
       </footer>
     </div>
   );

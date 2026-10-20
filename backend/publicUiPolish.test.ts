@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(resolve(process.cwd(), "frontend/src/App.tsx"), "utf8");
+const publicRouteMetadataSource = readFileSync(resolve(process.cwd(), "shared/publicRouteMetadata.ts"), "utf8");
 const notFoundSource = readFileSync(resolve(process.cwd(), "frontend/src/pages/NotFound.tsx"), "utf8");
 const homeSource = readFileSync(resolve(process.cwd(), "frontend/src/pages/Home.tsx"), "utf8");
 const innerShellSource = readFileSync(resolve(process.cwd(), "frontend/src/components/InnerPageShell.tsx"), "utf8");
@@ -13,7 +14,7 @@ const sharedStyles = readFileSync(resolve(process.cwd(), "frontend/src/index.css
 describe("public AASW visual polish", () => {
   it("keeps a direct contact alias inside the same branded contact experience", () => {
     expect(appSource).toContain('path={"/contact"} component={ContactUsPage}');
-    expect(appSource).toContain('"/contact": { title: "Contact AASW Foundation | Get in touch"');
+    expect(publicRouteMetadataSource).toContain('"/contact": { title: "Contact AASW Foundation | Get in touch"');
   });
 
   it("replaces the generic fallback with an AASW editorial not-found screen", () => {

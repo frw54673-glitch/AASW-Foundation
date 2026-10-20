@@ -94,7 +94,7 @@ export const MEDIA_CENTRE_MENU: HeaderMegaMenuDefinition = {
   description: "Find public updates, stories and reports that keep the Foundation’s work visible.",
   activePaths: ["/media-centre", "/updates", "/stories", "/field-gallery", "/reports"],
   groups: [
-    { label: "Stories & updates", href: "/media-centre", links: [{ label: "News & updates", href: "/updates", note: "News from the field" }, { label: "Impact stories", href: "/stories", note: "Our impact in numbers" }, { label: "Field gallery", href: "/field-gallery", note: "Published field record" }] },
+    { label: "Stories & updates", href: "/media-centre", links: [{ label: "News & updates", href: "/updates", note: "News from the field" }, { label: "Impact stories", href: "/stories", note: "Our impact in numbers" }, { label: "Field gallery", href: "/field-gallery", note: "Published field record" }, { label: "Reports & transparency", href: "/reports", note: "Annual records and public information" }] },
     { label: "Media contact", href: `${AASW_CONTACT.emailHref}?subject=Media%20enquiry%20for%20AASW%20Foundation`, links: [{ label: "Media contact", href: `${AASW_CONTACT.emailHref}?subject=Media%20enquiry%20for%20AASW%20Foundation`, note: "Write to AASW" }] },
   ],
 };

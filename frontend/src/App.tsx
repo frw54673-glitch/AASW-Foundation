@@ -10,6 +10,7 @@ import { AssistantChat } from "./components/AssistantChat";
 import { ReadingProgress, RevealController } from "./lib/reveal";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import { getRouteMetadata } from "@shared/publicRouteMetadata";
 
 const AboutPage = lazy(() => import("./pages/InnerPages").then(module => ({ default: module.AboutPage })));
 const DonatePage = lazy(() => import("./pages/InnerPages").then(module => ({ default: module.DonatePage })));
@@ -65,27 +66,6 @@ function RouteLoading() {
   );
 }
 
-type RouteMetadata = { title: string; description: string };
-
-const defaultRouteMetadata: RouteMetadata = {
-  title: "AASW Foundation | NGO for Women Empowerment in Uttar Pradesh",
-  description: "Fueling women's success through tech & enterprise — AASW Foundation is a registered NGO in Uttar Pradesh: 800+ women trained, 300+ businesses launched or scaled, 30+ eco-friendly projects across 5 districts.",
-};
-
-const routeMetadata: Record<string, RouteMetadata> = {
-  "/about": { title: "About AASW Foundation | Purpose, people and public trust", description: "Learn about AASW Foundation’s purpose, approach, people and public commitment in Uttar Pradesh." },
-  "/programs": { title: "AASW Foundation Programmes | Capability in practice", description: "Explore AASW Foundation programmes in digital capability, green enterprise, mentorship and community support." },
-  "/team": { title: "Our Team | AASW Foundation", description: "Meet the source-backed leadership, advisory and training team behind AASW Foundation." },
-  "/membership": { title: "Membership | AASW Foundation", description: "Apply for AASW Foundation membership and stay connected to practical support, learning and community." },
-  "/volunteer": { title: "Volunteer | AASW Foundation", description: "Volunteer with AASW Foundation and support digital education, green entrepreneurship and community work in Uttar Pradesh." },
-  "/donate": { title: "Donate | Support AASW Foundation", description: "Support AASW Foundation’s work with women through digital education, enterprise and community support." },
-  "/contact": { title: "Contact AASW Foundation | Get in touch", description: "Contact AASW Foundation for programme questions, partnerships, membership, donations or support enquiries." },
-  "/contact-us": { title: "Contact AASW Foundation | Get in touch", description: "Contact AASW Foundation for programme questions, partnerships, membership, donations or support enquiries." },
-  "/faq": { title: "FAQ | AASW Foundation", description: "Frequently asked questions about AASW Foundation donations, membership, volunteering and transparency." },
-  "/media-centre": { title: "Media Centre | AASW Foundation", description: "Read AASW Foundation updates, field notes and public information." },
-  "/field-gallery": { title: "Field Gallery | AASW Foundation", description: "View Foundation-approved field photographs from AASW work and community activity." },
-};
-
 function setMetadata(selector: string, attribute: "name" | "property", content: string) {
   const element = document.querySelector<HTMLMetaElement>(selector) ?? document.head.appendChild(document.createElement("meta"));
   element.setAttribute(attribute, selector.includes("og:") ? selector.match(/og:[^"]+/)?.[0] ?? "og:title" : selector.match(/name="([^"]+)/)?.[1] ?? "description");
@@ -97,13 +77,16 @@ function RouteMetadataManager() {
 
   useEffect(() => {
     const path = location.split("?")[0]?.split("#")[0] || "/";
-    const metadata = routeMetadata[path] ?? defaultRouteMetadata;
-    const canonicalUrl = new URL(path, window.location.origin).toString();
+    const metadata = getRouteMetadata(path);
+    const shellCanonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href;
+    const canonicalOrigin = shellCanonical ? new URL(shellCanonical).origin : window.location.origin;
+    const canonicalUrl = new URL(path, canonicalOrigin).toString();
     document.title = metadata.title;
     setMetadata('meta[name="description"]', "name", metadata.description);
     setMetadata('meta[property="og:title"]', "property", metadata.title);
     setMetadata('meta[property="og:description"]', "property", metadata.description);
     setMetadata('meta[property="og:url"]', "property", canonicalUrl);
+    setMetadata('meta[name="robots"]', "name", metadata.indexable === false ? "noindex,follow" : "index,follow");
     const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]') ?? document.head.appendChild(document.createElement("link"));
     canonical.rel = "canonical";
     canonical.href = canonicalUrl;

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createPaymentTransaction, getPaymentRefundByGatewayRefundId, getPaymentRefundsByReceipt, getPaymentTransactionByGatewayOrderId, getPaymentTransactionByReceipt, listPaymentRefunds, markPaymentRefundNotified, markPaymentRefundProcessed, markPaymentTransactionStatus, recordPaymentRefundInitiated } from "../db";
 import { dispatchRefundProcessedEmail } from "../email/refundNotification";
 import { dispatchVerifiedPaymentReceipt } from "../email/receipt";
-import { createRazorpayOrder, createRazorpayRefund, getRazorpayConfig, verifyRazorpayCheckoutSignature } from "../payments/razorpay";
+import { createRazorpayOrder, createRazorpayRefund, fetchRazorpayPayment, getRazorpayConfig, verifyRazorpayCheckoutSignature } from "../payments/razorpay";
 import { resolveDemoAmount } from "../../shared/payment-demo";
 import { misFinanceProcedure, publicProcedure, router } from "../_core/trpc";
 
@@ -24,6 +24,12 @@ function createReceipt(kind: "donation" | "membership") {
 
 export const paymentRouter = router({
   liveStatus: publicProcedure.query(() => ({ configured: Boolean(getRazorpayConfig()) })),
+  receiptStatus: publicProcedure.input(z.object({ receipt: z.string().trim().min(6).max(40) })).query(async ({ input }) => {
+    const transaction = await getPaymentTransactionByReceipt(input.receipt);
+    if (!transaction) return { status: "not_found" as const };
+    if (transaction.status !== "verified" && transaction.status !== "captured") return { status: "pending" as const };
+    return { status: "verified" as const, receipt: transaction.receipt, kind: transaction.kind, amount: transaction.amount / 100 };
+  }),
   createOrder: publicProcedure.input(checkoutInput).mutation(async ({ input }) => {
     const validAmount = resolveDemoAmount(input.kind, input.amount);
     if (!validAmount) throw new TRPCError({ code: "BAD_REQUEST", message: "Unsupported payment amount." });
@@ -52,6 +58,15 @@ export const paymentRouter = router({
     if (!transaction || !config || transaction.gatewayOrderId !== input.razorpayOrderId) throw new TRPCError({ code: "NOT_FOUND", message: "Payment order was not found." });
     if (!verifyRazorpayCheckoutSignature(transaction.gatewayOrderId, input.razorpayPaymentId, input.razorpaySignature, config.keySecret)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Payment verification failed." });
+    }
+    let payment;
+    try {
+      payment = await fetchRazorpayPayment(input.razorpayPaymentId);
+    } catch {
+      throw new TRPCError({ code: "BAD_GATEWAY", message: "The payment could not be confirmed with Razorpay. Please contact AASW before retrying." });
+    }
+    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency || payment.status !== "captured") {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Razorpay has not confirmed a captured payment matching this order. Please contact AASW before retrying." });
     }
     await markPaymentTransactionStatus(transaction.gatewayOrderId, "verified", input.razorpayPaymentId);
     const receiptDelivery = await dispatchVerifiedPaymentReceipt({ ...transaction, status: "verified", gatewayPaymentId: input.razorpayPaymentId });

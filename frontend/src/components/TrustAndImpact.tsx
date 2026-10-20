@@ -33,9 +33,9 @@ export function AnimatedCounter({ target, suffix = "", durationMs = 1600, classN
 }
 
 const trustItems = [
-  { icon: ShieldCheck, title: "Secure payments", copy: "Encrypted checkout via Razorpay." },
+  { icon: ShieldCheck, title: "Payment status", copy: "Checkout is clearly marked demo until live Razorpay is activated." },
   { icon: Landmark, title: "Registered society", copy: "Aapka Apna Social Welfare Foundation, Uttar Pradesh." },
-  { icon: Receipt, title: "Donation receipts", copy: "Every contribution gets a recorded receipt." },
+  { icon: Receipt, title: "Verified receipts", copy: "Receipts are issued only after a live payment is verified." },
   { icon: Lock, title: "Privacy by design", copy: "PAN and personal data stay encrypted." },
 ];
 

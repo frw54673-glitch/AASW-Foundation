@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const projectRoot = resolve(import.meta.dirname, "..");
 const documentSource = readFileSync(resolve(projectRoot, "frontend/index.html"), "utf8");
 const appSource = readFileSync(resolve(projectRoot, "frontend/src/App.tsx"), "utf8");
+const publicRouteMetadataSource = readFileSync(resolve(projectRoot, "shared/publicRouteMetadata.ts"), "utf8");
 const homeSource = readFileSync(resolve(projectRoot, "frontend/src/pages/Home.tsx"), "utf8");
 const robotsSource = readFileSync(resolve(projectRoot, "frontend/public/robots.txt"), "utf8");
 const serverSource = readFileSync(resolve(projectRoot, "backend/_core/index.ts"), "utf8");
@@ -25,7 +26,7 @@ describe("SEO and performance delivery", () => {
     expect(appSource).toContain("function RouteMetadataManager()");
     expect(appSource).toContain('canonical.rel = "canonical"');
     expect(appSource).toContain("setMetadata('meta[property=\"og:url\"]', \"property\", canonicalUrl)");
-    expect(appSource).toContain('"/contact-us": { title: "Contact AASW Foundation | Get in touch"');
+    expect(publicRouteMetadataSource).toContain('"/contact-us": { title: "Contact AASW Foundation | Get in touch"');
   });
 
   it("prioritises the homepage LCP image and lazy-loads below-the-fold editorial photos", () => {

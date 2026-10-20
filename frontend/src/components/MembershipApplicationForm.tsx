@@ -9,6 +9,7 @@ import { downloadMembershipRenewalReceiptPdf } from "@/lib/membershipRenewalRece
 import { createMembershipRenewalShareBadgeFile } from "@/lib/membershipRenewalShareBadge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PaymentDemoButton } from "@/components/PaymentDemoCheckout";
 
 type MembershipType = "annual" | "lifetime";
 type ProofType = "aadhaar" | "voter_id" | "passport" | "driving_licence" | "other";
@@ -142,6 +143,7 @@ export function MembershipApplicationForm() {
   const [reference, setReference] = useState<string | null>(null);
   const [membershipNo, setMembershipNo] = useState<string | null>(null);
   const [selectedMembershipType, setSelectedMembershipType] = useState<MembershipType>("annual");
+  const [checkoutSupporter, setCheckoutSupporter] = useState<{ name: string; email: string; phone: string } | null>(null);
   const [completedAsRenewal, setCompletedAsRenewal] = useState(false);
   const [isPreparingSubmission, setIsPreparingSubmission] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -189,6 +191,7 @@ export function MembershipApplicationForm() {
       setReference(result.applicationRef);
       setMembershipNo(result.membershipNo);
       setSelectedMembershipType(variables.membershipType);
+      setCheckoutSupporter({ name: variables.fullName, email: variables.email, phone: variables.phone });
       setCompletedAsRenewal(renewalRecorded);
       setRenewalRecordedAt(renewalRecorded ? new Date().toISOString() : null);
       setForm(initialState);
@@ -373,6 +376,7 @@ export function MembershipApplicationForm() {
             <div><dt>Selected path</dt><dd>{selectedMembershipType === "annual" ? "Annual membership" : "Lifetime membership"}</dd></div>
           </dl>
           {!completedAsRenewal && <p className="membership-success-note">The password-setup link expires after 72 hours. Do not share it with anyone.</p>}
+          {checkoutSupporter && <div className="membership-payment-next"><p className="section-kicker">Membership contribution</p><p>Complete your {selectedMembershipType === "annual" ? "₹1,100 annual" : "₹10,000 lifetime"} membership contribution securely with Razorpay.</p><PaymentDemoButton kind="membership" initialAmount={selectedMembershipType === "annual" ? 1100 : 10000} supporter={checkoutSupporter} className="button button-ochre" label="Pay membership contribution" /></div>}
           <a className="text-link" href="/member/login">{completedAsRenewal ? "Open your Member Portal" : "Open Member Login"} <Send size={15} /></a>
           {completedAsRenewal && <div className="membership-renewal-success-actions">{renewalRecordedAt && <button type="button" className="button button-primary membership-renewal-receipt" onClick={() => downloadMembershipRenewalReceiptPdf({ membershipNo, applicationRef: reference, recordedAt: renewalRecordedAt })}><Download size={16} />Download renewal PDF receipt</button>}<button type="button" className="membership-renewal-share" onClick={() => void downloadRenewalShareBadge()}><ImageDown size={16} />{badgeDownloaded ? "Share badge downloaded" : "Download share badge"}</button><button type="button" className="membership-renewal-share" onClick={() => void shareRenewalStatus()}><Share2 size={16} />{renewalShared ? "Shared renewal status" : "Share renewal status"}</button></div>}
           <button type="button" className="text-link" onClick={() => { setReference(null); setMembershipNo(null); setCompletedAsRenewal(false); setRenewalRecordedAt(null); }}>Submit another application <Send size={15} /></button>

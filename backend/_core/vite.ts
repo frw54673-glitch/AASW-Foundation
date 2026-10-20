@@ -5,6 +5,8 @@ import { nanoid } from "nanoid";
 import path from "path";
 import { createServer as createViteServer, type InlineConfig } from "vite";
 import viteConfig from "../../vite.config";
+import { renderRouteHtml, routeHttpStatus } from "./routeHtml";
+import { publicSiteOrigin } from "./sitemap";
 
 // vite.config may export either a plain config object or a defineConfig
 // callback (needed for mode-dependent plugins). Resolving the callback here
@@ -47,7 +49,8 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx?v=${nanoid()}"`
       );
       const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      const routeHtml = renderRouteHtml(page, req.originalUrl, publicSiteOrigin({ protocol: req.protocol, host: req.get("host") }));
+      res.status(routeHttpStatus(req.originalUrl)).set({ "Content-Type": "text/html" }).end(routeHtml);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
@@ -98,6 +101,11 @@ export function serveStatic(app: Express) {
       res.status(404).type("text/plain").send("Not found");
       return;
     }
-    res.sendFile(path.resolve(distPath, "index.html"));
+    fs.promises.readFile(path.resolve(distPath, "index.html"), "utf8")
+      .then(template => {
+        const origin = process.env.APP_URL?.trim() || `${req.protocol}://${req.get("host") || "localhost:3000"}`;
+        res.status(routeHttpStatus(pathname)).type("html").send(renderRouteHtml(template, pathname, origin));
+      })
+      .catch(() => res.status(500).type("text/plain").send("Unable to load the application shell"));
   });
 }
