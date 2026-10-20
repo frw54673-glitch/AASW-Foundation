@@ -1,10 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "express",
+  "framework": "vite",
   "buildCommand": "pnpm build",
-  "functions": {
-    "index.ts": {
-      "includeFiles": "public/index.html"
-    }
-  }
+  "outputDirectory": "dist/public"
 }
