@@ -5,6 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@types/express': 4.17.21
+  '@types/express-serve-static-core': 4.19.6
   tailwindcss>nanoid: 3.3.7
   path-to-regexp@0.1.12: 0.1.13
   qs@<6.16.0: '>=6.16.0 <7'
@@ -245,6 +247,9 @@ importers:
       '@types/express':
         specifier: 4.17.21
         version: 4.17.21
+      '@types/express-serve-static-core':
+        specifier: 4.19.6
+        version: 4.19.6
       '@types/google.maps':
         specifier: ^3.58.1
         version: 3.58.1
