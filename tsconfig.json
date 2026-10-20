@@ -1,5 +1,5 @@
 {
-  "include": ["index.ts", "api/**/*", "frontend/src/**/*", "shared/**/*", "backend/**/*"],
+  "include": ["index.ts", "frontend/src/**/*", "shared/**/*", "backend/**/*"],
   "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
   "compilerOptions": {
     "incremental": true,
