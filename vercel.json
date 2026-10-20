@@ -1,11 +1,20 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "express",
+  "framework": "vite",
   "buildCommand": "pnpm build",
-  "outputDirectory": null,
-  "functions": {
-    "index.ts": {
-      "includeFiles": "public/index.html"
+  "outputDirectory": "dist/public",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/sitemap.xml"
+    },
+    {
+      "source": "/((?!api/|sitemap\\.xml).*)",
+      "destination": "/index.html"
     }
-  }
+  ]
 }

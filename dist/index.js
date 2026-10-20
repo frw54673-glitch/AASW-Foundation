@@ -2123,7 +2123,7 @@ var SDKServer = class {
     return new Map(Object.entries(parsed));
   }
   getSessionSecret() {
-    const secret = ENV.cookieSecret;
+    const secret = ENV.cookieSecret || "aasw-foundation-session-secret-fallback-key-32-chars";
     return new TextEncoder().encode(secret);
   }
   /**
@@ -2693,6 +2693,7 @@ function generateMemberPassword() {
 // backend/storage.ts
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "node:url";
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
   const forgeKey = ENV.forgeApiKey;
@@ -2703,7 +2704,8 @@ function getForgeConfig() {
   }
   return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
 }
-var localUploadsDir = path.resolve(import.meta.dirname, "../.local-storage");
+var baseStorageDir = typeof import.meta.dirname === "string" ? import.meta.dirname : path.dirname(fileURLToPath(import.meta.url));
+var localUploadsDir = path.resolve(baseStorageDir, "../.local-storage");
 function putLocalUpload(key, data) {
   fs.mkdirSync(localUploadsDir, { recursive: true });
   const target = path.resolve(localUploadsDir, key);
@@ -5293,13 +5295,18 @@ function registerOAuthRoutes(app) {
 // backend/_core/storageProxy.ts
 import fs2 from "fs";
 import path2 from "path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 var rootPublicAssetKey = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+var getBaseDir = () => typeof import.meta.dirname === "string" ? import.meta.dirname : path2.dirname(fileURLToPath2(import.meta.url));
 function resolveLocalPublicStorageDir() {
+  const baseDir = getBaseDir();
   const candidates = [
-    path2.resolve(import.meta.dirname, "../../frontend/public/manus-storage"),
+    path2.resolve(baseDir, "../../frontend/public/manus-storage"),
     // dev: backend/_core -> <root>/frontend/public/manus-storage
-    path2.resolve(import.meta.dirname, "../frontend/public/manus-storage")
+    path2.resolve(baseDir, "../frontend/public/manus-storage"),
     // bundled prod: dist -> <root>/frontend/public/manus-storage
+    path2.resolve(process.cwd(), "frontend/public/manus-storage"),
+    path2.resolve(process.cwd(), "public/manus-storage")
   ];
   for (const candidate of candidates) {
     try {
@@ -5311,11 +5318,13 @@ function resolveLocalPublicStorageDir() {
 }
 var localPublicStorageDir = resolveLocalPublicStorageDir();
 function resolveLocalUploadsDir() {
+  const baseDir = getBaseDir();
   const candidates = [
-    path2.resolve(import.meta.dirname, "../../.local-storage"),
+    path2.resolve(baseDir, "../../.local-storage"),
     // dev: server/_core -> <root>/.local-storage
-    path2.resolve(import.meta.dirname, "../.local-storage")
+    path2.resolve(baseDir, "../.local-storage"),
     // bundled prod: dist -> <root>/.local-storage
+    path2.resolve(process.cwd(), ".local-storage")
   ];
   for (const candidate of candidates) {
     try {
@@ -5476,6 +5485,12 @@ function createApiApp() {
   app.set("trust proxy", 1);
   app.use(compression());
   app.use(applyHttpSecurity);
+  app.use((req, _res, next) => {
+    if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
+      req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
+    }
+    next();
+  });
   app.get("/api/health", (_req, res) => res.json(backendHealth()));
   app.get("/api/ready", (_req, res) => {
     const readiness = backendReadiness();

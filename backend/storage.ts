@@ -19,11 +19,14 @@ function getForgeConfig() {
   return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
 }
 
+import { fileURLToPath } from "node:url";
+
 // Dev-only fallback: without Forge credentials, keep uploads on local disk so
 // the full membership/application flow works in local development. Private
 // uploads (ID proofs) are never publicly served, so a private project-local
 // directory is sufficient. Production keeps requiring real storage credentials.
-const localUploadsDir = path.resolve(import.meta.dirname, "../.local-storage");
+const baseStorageDir = typeof import.meta.dirname === "string" ? import.meta.dirname : path.dirname(fileURLToPath(import.meta.url));
+const localUploadsDir = path.resolve(baseStorageDir, "../.local-storage");
 
 function putLocalUpload(key: string, data: Buffer | Uint8Array | string) {
   fs.mkdirSync(localUploadsDir, { recursive: true });

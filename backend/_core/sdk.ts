@@ -159,7 +159,7 @@ class SDKServer {
   }
 
   private getSessionSecret() {
-    const secret = ENV.cookieSecret;
+    const secret = ENV.cookieSecret || "aasw-foundation-session-secret-fallback-key-32-chars";
     return new TextEncoder().encode(secret);
   }
 

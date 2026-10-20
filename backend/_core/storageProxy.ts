@@ -4,7 +4,11 @@ import type { Express, Response } from "express";
 import { isPublishedGalleryStorageKey } from "../db";
 import { ENV } from "./env";
 
+import { fileURLToPath } from "node:url";
+
 const rootPublicAssetKey = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+
+const getBaseDir = () => typeof import.meta.dirname === "string" ? import.meta.dirname : path.dirname(fileURLToPath(import.meta.url));
 
 // Source-backed website assets are also committed under
 // frontend/public/manus-storage so they stay available when the storage backend
@@ -14,9 +18,12 @@ const rootPublicAssetKey = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
 // level higher, and some deployments run dist/index.js from arbitrary CWDs,
 // so the first candidate that exists wins.
 function resolveLocalPublicStorageDir(): string {
+  const baseDir = getBaseDir();
   const candidates = [
-    path.resolve(import.meta.dirname, "../../frontend/public/manus-storage"), // dev: backend/_core -> <root>/frontend/public/manus-storage
-    path.resolve(import.meta.dirname, "../frontend/public/manus-storage"), // bundled prod: dist -> <root>/frontend/public/manus-storage
+    path.resolve(baseDir, "../../frontend/public/manus-storage"), // dev: backend/_core -> <root>/frontend/public/manus-storage
+    path.resolve(baseDir, "../frontend/public/manus-storage"), // bundled prod: dist -> <root>/frontend/public/manus-storage
+    path.resolve(process.cwd(), "frontend/public/manus-storage"),
+    path.resolve(process.cwd(), "public/manus-storage"),
   ];
   for (const candidate of candidates) {
     try {
@@ -34,9 +41,11 @@ const localPublicStorageDir = resolveLocalPublicStorageDir();
 // here so published gallery photos uploaded in local development can be
 // served; private keys never reach this resolver (see canServePublicStorageKey).
 function resolveLocalUploadsDir(): string {
+  const baseDir = getBaseDir();
   const candidates = [
-    path.resolve(import.meta.dirname, "../../.local-storage"), // dev: server/_core -> <root>/.local-storage
-    path.resolve(import.meta.dirname, "../.local-storage"), // bundled prod: dist -> <root>/.local-storage
+    path.resolve(baseDir, "../../.local-storage"), // dev: server/_core -> <root>/.local-storage
+    path.resolve(baseDir, "../.local-storage"), // bundled prod: dist -> <root>/.local-storage
+    path.resolve(process.cwd(), ".local-storage"),
   ];
   for (const candidate of candidates) {
     try {

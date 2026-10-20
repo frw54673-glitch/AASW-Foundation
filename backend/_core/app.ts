@@ -25,6 +25,14 @@ export function createApiApp() {
   app.use(compression());
   app.use(applyHttpSecurity);
 
+  // Normalize URL for serverless environments (e.g. Vercel) where the /api prefix may be stripped
+  app.use((req, _res, next) => {
+    if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
+      req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
+    }
+    next();
+  });
+
   app.get("/api/health", (_req, res) => res.json(backendHealth()));
   app.get("/api/ready", (_req, res) => {
     const readiness = backendReadiness();
