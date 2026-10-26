@@ -41,6 +41,7 @@ const officialTeamPortraits = {
   kshamaRani: "/manus-storage/kshama-rani.jpg",
   sikhaNayak: "/manus-storage/sikha-nayak.jpg",
   archanaKar: "/manus-storage/archana-kar.png",
+  sipraDey: "/manus-storage/sipra-dey.png",
   trainerOne: "/manus-storage/trainer-1_5b332362.webp",
   trainerTwo: "/manus-storage/trainer-2_fcbe185e.webp",
   trainerThree: "/manus-storage/trainer-3_1facb098.webp",
@@ -98,6 +99,7 @@ const teamData = [
   { name: "Kshama Rani", category: "Program Manager", group: "program" as const, image: officialTeamPortraits.kshamaRani, portraitMode: "face-safe" as const, bio: "Leads the Foundation's programme delivery across Uttar Pradesh — coordinating digital training cohorts, green enterprise initiatives and community field events end to end." },
   { name: "Sikha Nayak", category: "State Head - Odisha", group: "program" as const, image: officialTeamPortraits.sikhaNayak, portraitMode: "face-safe" as const, bio: "State Head for Odisha — coordinating AASW programmes, field partnerships and member support across the state, working closely with the central programme team." },
   { name: "Archana Kar", category: "Social Media Manager", group: "program" as const, image: officialTeamPortraits.archanaKar, portraitMode: "face-safe" as const, bio: "Manages AASW Foundation’s social media presence and helps share programme updates, field activities and community stories." },
+  { name: "Sipra Dey", category: "State Head - Assam", group: "program" as const, image: officialTeamPortraits.sipraDey, portraitMode: "face-safe" as const, bio: "State Head for Assam — coordinating AASW programmes, community outreach and grassroots empowerment initiatives across Assam, working closely with the central leadership and field teams." },
 ];
 
 const stateCouncilGallery = stateCouncilMembers.map((name) => ({ name, category: "State Council Member", group: "state" as const, hasSourcePortrait: false }));
