@@ -5557,7 +5557,7 @@ function createApiApp() {
       } else if (matchedPath && matchedPath.startsWith("/api") && !matchedPath.startsWith("/api/index") && matchedPath !== "/api") {
         req.url = matchedPath;
       }
-    } else if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
+    } else if (process.env.VERCEL && !req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
       req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
     }
     next();
@@ -5602,7 +5602,6 @@ function createApiApp() {
 // backend/_core/vite.ts
 import express2 from "express";
 import fs4 from "fs";
-import { nanoid as nanoid8 } from "nanoid";
 import path4 from "path";
 import { createServer as createViteServer } from "vite";
 
@@ -5927,17 +5926,12 @@ async function setupVite(app, server, port) {
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
     try {
-      const clientTemplate = path4.resolve(
-        import.meta.dirname,
-        "../..",
-        "frontend",
-        "index.html"
-      );
+      const clientTemplate = [
+        path4.resolve(process.cwd(), "frontend", "index.html"),
+        path4.resolve(import.meta.dirname, "../..", "frontend", "index.html"),
+        path4.resolve(import.meta.dirname, "..", "frontend", "index.html")
+      ].find((p) => fs4.existsSync(p)) ?? path4.resolve(process.cwd(), "frontend", "index.html");
       let template = await fs4.promises.readFile(clientTemplate, "utf-8");
-      template = template.replace(
-        `src="/src/main.tsx"`,
-        `src="/src/main.tsx?v=${nanoid8()}"`
-      );
       const page = await vite.transformIndexHtml(url, template);
       const routeHtml = renderRouteHtml(page, req.originalUrl, publicSiteOrigin({ protocol: req.protocol, host: req.get("host") }));
       res.status(routeHttpStatus(req.originalUrl)).set({ "Content-Type": "text/html" }).end(routeHtml);
@@ -5948,7 +5942,11 @@ async function setupVite(app, server, port) {
   });
 }
 function serveStatic(app) {
-  const distPath = process.env.NODE_ENV === "development" ? path4.resolve(import.meta.dirname, "../..", "dist", "public") : path4.resolve(import.meta.dirname, "public");
+  const distPath = [
+    path4.resolve(process.cwd(), "dist", "public"),
+    path4.resolve(import.meta.dirname, "public"),
+    path4.resolve(import.meta.dirname, "../..", "dist", "public")
+  ].find((p) => fs4.existsSync(p)) ?? path4.resolve(process.cwd(), "dist", "public");
   if (!fs4.existsSync(distPath)) {
     console.error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`
@@ -6077,7 +6075,8 @@ async function startServer() {
   const preferredPort = parseInt(process.env.PORT || "3000", 10);
   const port = await findAvailablePort(preferredPort);
   if (port !== preferredPort) console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
-  if (process.env.NODE_ENV === "development") {
+  const isDistBuild = import.meta.dirname.includes("dist") || Boolean(process.argv[1]) && process.argv[1].includes("dist");
+  if (process.env.NODE_ENV === "development" && !isDistBuild) {
     await setupVite(app, server, port);
   } else {
     serveStatic(app);

@@ -5552,7 +5552,7 @@ function createApiApp() {
       } else if (matchedPath && matchedPath.startsWith("/api") && !matchedPath.startsWith("/api/index") && matchedPath !== "/api") {
         req.url = matchedPath;
       }
-    } else if (!req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
+    } else if (process.env.VERCEL && !req.url.startsWith("/api") && !req.url.startsWith("/sitemap.xml")) {
       req.url = `/api${req.url.startsWith("/") ? "" : "/"}${req.url}`;
     }
     next();

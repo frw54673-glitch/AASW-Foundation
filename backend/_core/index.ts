@@ -112,7 +112,8 @@ async function startServer() {
   const port = await findAvailablePort(preferredPort);
   if (port !== preferredPort) console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
 
-  if (process.env.NODE_ENV === "development") {
+  const isDistBuild = import.meta.dirname.includes("dist") || (Boolean(process.argv[1]) && process.argv[1].includes("dist"));
+  if (process.env.NODE_ENV === "development" && !isDistBuild) {
     await setupVite(app, server, port);
   } else {
     serveStatic(app);
