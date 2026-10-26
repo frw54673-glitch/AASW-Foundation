@@ -355,11 +355,7 @@ button { font-family: inherit; }
   .team-grid-program .team-photo { height: clamp(335px, 30vw, 425px); }
   .team-grid-program .team-photo-face-safe { background: linear-gradient(145deg, #e3d9f0, #fff7e9); }
   .team-grid-program .team-card-copy { min-height: 148px; padding: 1.2rem 1.25rem 1.35rem; }
-  .team-grid-program .team-card-copy h3 { margin-bottom: 0; font-size: clamp(1.7rem, 2.1vw, 2.1rem); }
-  @media (min-width: 1120px) {
-    .team-grid-program { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 1320px; }
-    .team-grid-program .team-card-copy h3 { font-size: clamp(1.4rem, 1.5vw, 1.75rem); }
-  }
+  .team-grid-program .team-card-copy h3 { margin-bottom: 0; font-size: clamp(1.6rem, 1.9vw, 2rem); }
   .inner-join-section { background: #d09b3b; }
   .inner-join-grid { display: grid; grid-template-columns: 1fr .8fr; gap: 5rem; align-items: end; }
   .inner-join-grid h2 { font-size: clamp(3.4rem, 6vw, 6rem); }

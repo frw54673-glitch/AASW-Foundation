@@ -42,6 +42,7 @@ const officialTeamPortraits = {
   sikhaNayak: "/manus-storage/sikha-nayak.jpg",
   archanaKar: "/manus-storage/archana-kar.png",
   sipraDey: "/manus-storage/sipra-dey.png",
+  hireRajeshree: "/manus-storage/hire-rajeshree.png",
   trainerOne: "/manus-storage/trainer-1_5b332362.webp",
   trainerTwo: "/manus-storage/trainer-2_fcbe185e.webp",
   trainerThree: "/manus-storage/trainer-3_1facb098.webp",
@@ -100,6 +101,7 @@ const teamData = [
   { name: "Sikha Nayak", category: "State Head - Odisha", group: "program" as const, image: officialTeamPortraits.sikhaNayak, portraitMode: "face-safe" as const, bio: "State Head for Odisha — coordinating AASW programmes, field partnerships and member support across the state, working closely with the central programme team." },
   { name: "Archana Kar", category: "Social Media Manager", group: "program" as const, image: officialTeamPortraits.archanaKar, portraitMode: "face-safe" as const, bio: "Manages AASW Foundation’s social media presence and helps share programme updates, field activities and community stories." },
   { name: "Sipra Dey", category: "State Head - Assam", group: "program" as const, image: officialTeamPortraits.sipraDey, portraitMode: "face-safe" as const, bio: "State Head for Assam — coordinating AASW programmes, community outreach and grassroots empowerment initiatives across Assam, working closely with the central leadership and field teams." },
+  { name: "Hire Rajeshree", category: "State Head - Gujarat", group: "program" as const, image: officialTeamPortraits.hireRajeshree, portraitMode: "face-safe" as const, bio: "State Head for Gujarat — coordinating AASW programmes, women entrepreneurship initiatives and grassroots community outreach across Gujarat, working closely with the central leadership and field teams." },
 ];
 
 const stateCouncilGallery = stateCouncilMembers.map((name) => ({ name, category: "State Council Member", group: "state" as const, hasSourcePortrait: false }));
