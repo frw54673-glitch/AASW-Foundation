@@ -427,11 +427,11 @@ export default function Home() {
             <div className="hero-visual-wrap" ref={heroVisualRef} data-reveal="right" data-reveal-delay="2">
               <div className="hero-chapter">01 / AASW FOUNDATION</div>
               <div className="hero-visual" ref={heroTiltRef}>
-                <img src="/manus-storage/aasw-field-session_43c9b878.jpeg" alt="AASW women taking part in a capability-building field session" fetchPriority="high" decoding="async" />
+                <img src="/manus-storage/aasw-digital-training-batch_c6442321.jpeg" alt="AASW digital training and AI skilling program" fetchPriority="high" decoding="async" />
                 <div className="hero-image-overlay" />
                 <div className="hero-caption">
                   <span>From the field</span>
-                  <strong>Digital training in progress, Uttar Pradesh.</strong>
+                  <strong>Digital &amp; AI training in progress.</strong>
                 </div>
                 <span className="illustrative-tag">AASW field photo</span>
               </div>
