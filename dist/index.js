@@ -789,7 +789,10 @@ var ENV = {
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
-  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? ""
+  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  insforgeUrl: process.env.INSFORGE_URL ?? process.env.VITE_INSFORGE_URL ?? "",
+  insforgeAnonKey: process.env.INSFORGE_ANON_KEY ?? process.env.VITE_INSFORGE_ANON_KEY ?? "",
+  insforgeApiKey: process.env.INSFORGE_API_KEY ?? ""
 };
 
 // shared/memberMembership.ts
@@ -2739,6 +2742,19 @@ function generateMemberPassword() {
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "node:url";
+
+// backend/_core/insforge.ts
+import { createClient, createAdminClient } from "@insforge/sdk";
+var insforgeClient = createClient({
+  baseUrl: ENV.insforgeUrl || "https://3q8p3w2r.ap-southeast.insforge.app",
+  anonKey: ENV.insforgeAnonKey || "anon_7b32e745ccee627ff2825a8a05b1150ca8a7f79bbfd95192f372dadc86263437"
+});
+var insforgeAdmin = createAdminClient({
+  baseUrl: ENV.insforgeUrl || "https://3q8p3w2r.ap-southeast.insforge.app",
+  apiKey: ENV.insforgeApiKey || "ik_6f949eb49036f42147e4b6eccbe661f2"
+});
+
+// backend/storage.ts
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
   const forgeKey = ENV.forgeApiKey;
@@ -2769,53 +2785,81 @@ function appendHashSuffix(relKey) {
   if (lastDot === -1) return `${relKey}_${hash}`;
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
+function resolveInsForgeBucket(key) {
+  const lower = key.toLowerCase();
+  if (lower.startsWith("gallery") || lower.includes("gallery")) return "gallery";
+  if (lower.startsWith("receipt") || lower.includes("receipt")) return "receipts";
+  return "member-documents";
+}
 async function storagePut(relKey, data, contentType = "application/octet-stream") {
-  if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY");
-    }
-    const key2 = appendHashSuffix(normalizeKey(relKey));
-    putLocalUpload(key2, data);
-    return { key: key2, url: `/manus-storage/${key2}` };
-  }
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
-  const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
-  presignUrl.searchParams.set("path", key);
-  const presignResp = await fetch(presignUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` }
-  });
-  if (!presignResp.ok) {
-    const msg = await presignResp.text().catch(() => presignResp.statusText);
-    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
+  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+    try {
+      const bucket = resolveInsForgeBucket(key);
+      const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
+      const { data: uploadData, error } = await insforgeAdmin.storage.from(bucket).upload(key, blob);
+      if (!error && uploadData?.url) {
+        return { key: uploadData.key, url: uploadData.url };
+      }
+      console.warn("[Storage] InsForge upload failed, falling back:", error);
+    } catch (err) {
+      console.warn("[Storage] InsForge upload error, falling back:", err);
+    }
   }
-  const { url: s3Url } = await presignResp.json();
-  if (!s3Url) throw new Error("Forge returned empty presign URL");
-  const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
-  const uploadResp = await fetch(s3Url, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: blob
-  });
-  if (!uploadResp.ok) {
-    throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
+  if (ENV.forgeApiUrl && ENV.forgeApiKey) {
+    const { forgeUrl, forgeKey } = getForgeConfig();
+    const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
+    presignUrl.searchParams.set("path", key);
+    const presignResp = await fetch(presignUrl, {
+      headers: { Authorization: `Bearer ${forgeKey}` }
+    });
+    if (presignResp.ok) {
+      const { url: s3Url } = await presignResp.json();
+      if (s3Url) {
+        const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
+        const uploadResp = await fetch(s3Url, {
+          method: "PUT",
+          headers: { "Content-Type": contentType },
+          body: blob
+        });
+        if (uploadResp.ok) {
+          return { key, url: `/manus-storage/${key}` };
+        }
+      }
+    }
   }
+  if (process.env.NODE_ENV === "production" && !ENV.insforgeApiKey) {
+    throw new Error("Storage config missing: set INSFORGE_API_KEY or BUILT_IN_FORGE_API_KEY");
+  }
+  putLocalUpload(key, data);
   return { key, url: `/manus-storage/${key}` };
 }
 async function storageGetSignedUrl(relKey) {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = normalizeKey(relKey);
-  const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
-  getUrl.searchParams.set("path", key);
-  const resp = await fetch(getUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` }
-  });
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
+  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+    try {
+      const bucket = resolveInsForgeBucket(key);
+      const { data, error } = await insforgeAdmin.storage.from(bucket).createSignedUrl(key, 3600);
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+    } catch (err) {
+      console.warn("[Storage] InsForge signed URL error:", err);
+    }
   }
-  const { url } = await resp.json();
-  return url;
+  if (ENV.forgeApiUrl && ENV.forgeApiKey) {
+    const { forgeUrl, forgeKey } = getForgeConfig();
+    const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
+    getUrl.searchParams.set("path", key);
+    const resp = await fetch(getUrl, {
+      headers: { Authorization: `Bearer ${forgeKey}` }
+    });
+    if (resp.ok) {
+      const { url } = await resp.json();
+      return url;
+    }
+  }
+  throw new Error("Storage signed URL could not be generated");
 }
 var localProofMimeByExtension = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", pdf: "application/pdf" };
 function storageGetLocalUpload(relKey) {
@@ -2828,7 +2872,7 @@ function storageGetLocalUpload(relKey) {
   return { data: fs.readFileSync(target), mimeType };
 }
 function isLocalUploadMode() {
-  return !ENV.forgeApiUrl || !ENV.forgeApiKey;
+  return (!ENV.forgeApiUrl || !ENV.forgeApiKey) && !ENV.insforgeApiKey;
 }
 function storageLocalUploadDataUrl(relKey) {
   const local = storageGetLocalUpload(relKey);
@@ -5184,8 +5228,8 @@ function createRedisRateLimitStore(url) {
       } catch {
         throw new Error("REDIS_URL is set but the redis package is not installed. Run `pnpm add redis` or unset REDIS_URL to use the in-memory limiter.");
       }
-      const createClient = redisModule.createClient;
-      const client = createClient({ url });
+      const createClient2 = redisModule.createClient;
+      const client = createClient2({ url });
       client.on("error", (error) => console.error("[RateLimit] Redis store error", { error: error.message }));
       await client.connect();
       return client;
