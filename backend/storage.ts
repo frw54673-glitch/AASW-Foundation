@@ -56,6 +56,13 @@ export function resolveInsForgeBucket(key: string): string {
   return "member-documents";
 }
 
+function shouldUseInsForge(): boolean {
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return Boolean(ENV.insforgeApiKey && ENV.insforgeUrl);
+  }
+  return Boolean(ENV.insforgeApiKey || process.env.NODE_ENV === "production" || process.env.VERCEL);
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
@@ -63,8 +70,8 @@ export async function storagePut(
 ): Promise<{ key: string; url: string }> {
   const key = appendHashSuffix(normalizeKey(relKey));
 
-  // 1. Try InsForge Storage if configured
-  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+  // 1. Try InsForge Storage when configured or in production/serverless runtimes
+  if (shouldUseInsForge()) {
     try {
       const bucket = resolveInsForgeBucket(key);
       const blob = typeof data === "string"
@@ -114,9 +121,9 @@ export async function storagePut(
     }
   }
 
-  // 3. Local disk fallback (dev & vitest test suites)
-  if (process.env.NODE_ENV === "production" && !ENV.insforgeApiKey) {
-    throw new Error("Storage config missing: set INSFORGE_API_KEY or BUILT_IN_FORGE_API_KEY");
+  // 3. Local disk fallback (dev & vitest test suites only)
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+    throw new Error("Storage upload failed in production: InsForge/S3 upload did not succeed.");
   }
 
   putLocalUpload(key, data);
@@ -126,7 +133,7 @@ export async function storagePut(
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
 
-  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+  if (shouldUseInsForge()) {
     try {
       const bucket = resolveInsForgeBucket(key);
       const { data } = insforgeAdmin.storage.from(bucket).getPublicUrl(key);
@@ -142,7 +149,7 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const key = normalizeKey(relKey);
 
-  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+  if (shouldUseInsForge()) {
     try {
       const bucket = resolveInsForgeBucket(key);
       const { data, error } = await insforgeAdmin.storage.from(bucket).createSignedUrl(key, 3600);
@@ -185,7 +192,7 @@ export function storageGetLocalUpload(relKey: string): { data: Buffer; mimeType:
 }
 
 export function isLocalUploadMode(): boolean {
-  return (!ENV.forgeApiUrl || !ENV.forgeApiKey) && !ENV.insforgeApiKey;
+  return (!ENV.forgeApiUrl || !ENV.forgeApiKey) && !shouldUseInsForge();
 }
 
 export function storageLocalUploadDataUrl(relKey: string): string {

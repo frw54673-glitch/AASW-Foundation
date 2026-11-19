@@ -1,3 +1,4 @@
+import "dotenv/config";
 import net from "node:net";
 import tls from "node:tls";
 import { describe, expect, it } from "vitest";

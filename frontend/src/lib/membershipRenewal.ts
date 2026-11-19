@@ -13,12 +13,16 @@ export function membershipSubmissionErrorMessage(message: string, isRenewal: boo
     return "We could not find an AASW member account with this email address. Please use the email connected to your existing membership, or contact the Foundation for help.";
   }
 
-  if (isRenewal && normalized.includes("active membership already exists")) {
-    return "Your annual membership is already active. You do not need to renew right now—please continue through the Member Portal.";
+  if (normalized.includes("active membership already exists")) {
+    return isRenewal
+      ? "Your annual membership is already active. You do not need to renew right now—please continue through the Member Portal."
+      : "An active AASW membership already exists for this email address. Please sign in to the Member Portal, or use a different email address for a new application.";
   }
 
   if (normalized.includes("id proof could not be securely uploaded")) {
-    return "Your ID proof could not be securely uploaded. Please check the file and try again. No renewal has been submitted.";
+    return isRenewal
+      ? "Your ID proof could not be securely uploaded. Please check the file and try again. No renewal has been submitted."
+      : "Your ID proof could not be securely uploaded. Please check the file and try again. No application has been submitted.";
   }
 
   return isRenewal

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createPaymentTransaction, getPaymentRefundByGatewayRefundId, getPaymentRefundsByReceipt, getPaymentTransactionByGatewayOrderId, getPaymentTransactionByReceipt, listPaymentRefunds, markPaymentRefundNotified, markPaymentRefundProcessed, markPaymentTransactionStatus, recordPaymentRefundInitiated } from "../db";
 import { dispatchRefundProcessedEmail } from "../email/refundNotification";
 import { dispatchVerifiedPaymentReceipt } from "../email/receipt";
-import { createRazorpayOrder, createRazorpayRefund, fetchRazorpayPayment, getRazorpayConfig, verifyRazorpayCheckoutSignature } from "../payments/razorpay";
+import { captureRazorpayPayment, createRazorpayOrder, createRazorpayRefund, fetchRazorpayPayment, getRazorpayConfig, verifyRazorpayCheckoutSignature } from "../payments/razorpay";
 import { resolveDemoAmount } from "../../shared/payment-demo";
 import { misFinanceProcedure, publicProcedure, router } from "../_core/trpc";
 
@@ -65,7 +65,23 @@ export const paymentRouter = router({
     } catch {
       throw new TRPCError({ code: "BAD_GATEWAY", message: "The payment could not be confirmed with Razorpay. Please contact AASW before retrying." });
     }
-    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency || payment.status !== "captured") {
+    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Razorpay payment details did not match this order. Please contact AASW before retrying." });
+    }
+    // Live UPI/Card checkouts frequently report "authorized" right after the
+    // modal handler fires; capture it server-side (or re-fetch if auto-captured).
+    if (payment.status === "authorized") {
+      try {
+        payment = await captureRazorpayPayment({ paymentId: input.razorpayPaymentId, amount: transaction.amount, currency: transaction.currency });
+      } catch {
+        try {
+          payment = await fetchRazorpayPayment(input.razorpayPaymentId);
+        } catch {
+          // fall through to status check below
+        }
+      }
+    }
+    if (payment.status !== "captured") {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Razorpay has not confirmed a captured payment matching this order. Please contact AASW before retrying." });
     }
     await markPaymentTransactionStatus(transaction.gatewayOrderId, "verified", input.razorpayPaymentId);

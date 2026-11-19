@@ -84,6 +84,23 @@ export async function fetchRazorpayPayment(paymentId: string): Promise<z.infer<t
   return razorpayPaymentSchema.parse(await response.json());
 }
 
+export async function captureRazorpayPayment(input: { paymentId: string; amount: number; currency: string }): Promise<z.infer<typeof razorpayPaymentSchema>> {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(config.keyId + ":" + config.keySecret).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/payments/" + encodeURIComponent(input.paymentId) + "/capture", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Basic " + authorization },
+    body: JSON.stringify({ amount: input.amount, currency: input.currency }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Razorpay payment capture failed (${response.status}): ${text.slice(0, 200)}`);
+  }
+  return razorpayPaymentSchema.parse(await response.json());
+}
+
 export type RazorpayRefund = z.infer<typeof razorpayRefundSchema>;
 
 /**

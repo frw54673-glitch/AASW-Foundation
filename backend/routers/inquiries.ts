@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { createContactInquiry, markContactInquiryNotification, subscribeNewsletterEmail } from "../db";
 import { dispatchInquiryNotification, INQUIRY_TOPICS } from "../email/inquiryNotification";
+import { dispatchNewsletterWelcomeEmail } from "../email/newsletterWelcome";
 import { publicProcedure, router } from "../_core/trpc";
 
 export const contactInquiryInput = z.object({
@@ -42,6 +43,9 @@ export const newsletterRouter = router({
     if (input.website) throw new TRPCError({ code: "BAD_REQUEST", message: "Unable to process this subscription." });
     const email = input.email.toLowerCase();
     const result = await subscribeNewsletterEmail({ email, source: input.source });
+    if (result.created) {
+      await dispatchNewsletterWelcomeEmail(email).catch(() => {});
+    }
     return { email, status: "subscribed" as const, alreadySubscribed: !result.created };
   }),
 });

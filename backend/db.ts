@@ -236,6 +236,150 @@ export async function createMembershipApplicationWithActivation(input: Membershi
   throw new Error("Membership number allocation could not be completed.");
 }
 
+export async function assertMembershipEligibility(input: { email: string; panHash: string; renewalIntent?: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for membership verification.");
+  const [existing] = await db
+    .select({
+      member: members,
+      applicationId: membershipApplications.id,
+      panHash: membershipApplications.panHash,
+      panEncrypted: membershipApplications.panEncrypted,
+    })
+    .from(members)
+    .innerJoin(membershipApplications, eq(members.applicationRef, membershipApplications.applicationRef))
+    .where(eq(members.email, input.email))
+    .limit(1);
+
+  if (existing) {
+    const verifiedPanHash = existing.panHash || hashSensitiveMatchValue(decryptSensitiveValue(existing.panEncrypted));
+    if (verifiedPanHash !== input.panHash) throw new Error("Membership renewal identity did not match.");
+    const now = new Date();
+    const validity = getMembershipValidity(existing.member.memberType, existing.member.joiningDate, now);
+    if (existing.member.status === "active" && existing.member.accountStatus === "active" && validity.membershipStatus === "active") {
+      throw new Error("An active membership already exists for this email.");
+    }
+    return { existingMemberId: existing.member.id, isRenewal: true };
+  }
+
+  if (input.renewalIntent) throw new Error("No existing membership found for this renewal email.");
+  return { existingMemberId: null, isRenewal: false };
+}
+
+export async function getMembershipApplicationByRef(applicationRef: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(membershipApplications).where(eq(membershipApplications.applicationRef, applicationRef)).limit(1);
+  return rows[0];
+}
+
+export async function activateMembershipFromExistingApplication(input: {
+  applicationRef: string;
+  setupTokenHash: string;
+  setupTokenExpiresAt: Date;
+  passwordHash: string;
+  renewalIntent?: boolean;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for membership activation.");
+  const year = new Date().getUTCFullYear();
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await db.transaction(async tx => {
+        const [application] = await tx
+          .select()
+          .from(membershipApplications)
+          .where(eq(membershipApplications.applicationRef, input.applicationRef))
+          .limit(1);
+        if (!application) throw new Error("Membership application was not found.");
+
+        const [alreadyActivated] = await tx
+          .select()
+          .from(members)
+          .where(eq(members.applicationRef, input.applicationRef))
+          .limit(1);
+        if (alreadyActivated && application.status === "approved") {
+          return { memberId: alreadyActivated.id, membershipNo: alreadyActivated.membershipNo, isRenewal: Boolean(input.renewalIntent) };
+        }
+
+        const [existing] = await tx
+          .select({
+            member: members,
+            applicationId: membershipApplications.id,
+            panHash: membershipApplications.panHash,
+            panEncrypted: membershipApplications.panEncrypted,
+          })
+          .from(members)
+          .innerJoin(membershipApplications, eq(members.applicationRef, membershipApplications.applicationRef))
+          .where(eq(members.email, application.email))
+          .limit(1);
+        const now = new Date();
+
+        await tx
+          .update(membershipApplications)
+          .set({ status: "approved", updatedAt: now })
+          .where(eq(membershipApplications.applicationRef, input.applicationRef));
+
+        if (existing) {
+          const appPanHash = application.panHash || hashSensitiveMatchValue(decryptSensitiveValue(application.panEncrypted));
+          const verifiedPanHash = existing.panHash || hashSensitiveMatchValue(decryptSensitiveValue(existing.panEncrypted));
+          if (verifiedPanHash !== appPanHash) throw new Error("Membership renewal identity did not match.");
+          if (!existing.panHash) await tx.update(membershipApplications).set({ panHash: verifiedPanHash, updatedAt: now }).where(eq(membershipApplications.id, existing.applicationId));
+          const validity = getMembershipValidity(existing.member.memberType, existing.member.joiningDate, now);
+          if (existing.member.status === "active" && existing.member.accountStatus === "active" && validity.membershipStatus === "active") {
+            throw new Error("An active membership already exists for this email.");
+          }
+
+          const [latestCycle] = await tx.select({ cycleNumber: memberMembershipCycles.cycleNumber }).from(memberMembershipCycles).where(eq(memberMembershipCycles.memberId, existing.member.id)).orderBy(desc(memberMembershipCycles.cycleNumber)).limit(1);
+          if (!latestCycle) {
+            const historical = membershipCycleDates(existing.member.memberType, new Date(existing.member.joiningDate));
+            await tx.insert(memberMembershipCycles).values({ memberId: existing.member.id, applicationRef: existing.member.applicationRef, cycleNumber: 1, membershipType: existing.member.memberType === "lifetime" ? "lifetime" : "annual", ...historical, status: "expired", expiredAt: now });
+          } else {
+            await tx.update(memberMembershipCycles).set({ status: "expired", expiredAt: now, updatedAt: now }).where(and(eq(memberMembershipCycles.memberId, existing.member.id), eq(memberMembershipCycles.status, "active")));
+          }
+          const cycleDates = membershipCycleDates(application.membershipType, now);
+          const nextCycleNumber = (latestCycle?.cycleNumber ?? 1) + 1;
+          await tx.update(members).set({ applicationRef: application.applicationRef, fullName: application.fullName, phone: application.phone, memberType: application.membershipType, city: application.city, state: application.state, district: application.district, joiningDate: now, status: "active", accountStatus: "active", loginAttempts: 0, lockedUntil: null, updatedAt: now }).where(eq(members.id, existing.member.id));
+          await tx.insert(memberMembershipCycles).values({ memberId: existing.member.id, applicationRef: application.applicationRef, cycleNumber: nextCycleNumber, membershipType: application.membershipType, ...cycleDates, status: "active" });
+          await tx.insert(foundationAdminAlerts).values({ alertType: "member_auto_approved", applicationRef: application.applicationRef, memberId: existing.member.id, title: "Membership renewed (paid)", message: `${application.fullName} · ${existing.member.membershipNo} completed payment and renewed membership.` });
+          return { memberId: existing.member.id, membershipNo: existing.member.membershipNo, isRenewal: true };
+        }
+
+        if (input.renewalIntent) throw new Error("No existing membership found for this renewal email.");
+
+        const current = await tx.select({ membershipNo: members.membershipNo }).from(members).where(like(members.membershipNo, `AASW-${year}-%`)).orderBy(desc(members.membershipNo)).limit(1);
+        const membershipNo = nextMembershipNumber(current[0]?.membershipNo ?? null, year);
+        const created = await tx.insert(members).values({
+          applicationRef: application.applicationRef,
+          membershipNo,
+          fullName: application.fullName,
+          email: application.email,
+          phone: application.phone,
+          memberType: application.membershipType,
+          city: application.city,
+          state: application.state,
+          district: application.district,
+          passwordHash: input.passwordHash,
+          mustChangePassword: false,
+          joiningDate: now,
+        });
+        const memberId = Number(created[0].insertId);
+        const cycleDates = membershipCycleDates(application.membershipType, now);
+        await tx.insert(memberMembershipCycles).values({ memberId, applicationRef: application.applicationRef, cycleNumber: 1, membershipType: application.membershipType, ...cycleDates, status: "active" });
+        await tx.insert(accountSetupTokens).values({ memberId, tokenHash: input.setupTokenHash, expiresAt: input.setupTokenExpiresAt });
+        await tx.insert(foundationAdminAlerts).values({ alertType: "member_auto_approved", applicationRef: application.applicationRef, memberId, title: "New member activated (paid)", message: `${application.fullName} · ${membershipNo} completed payment and activated membership.` });
+        return { memberId, membershipNo, isRenewal: false };
+      });
+    } catch (error) {
+      if (attempt < 2 && isDuplicateKeyError(error)) continue;
+      throw error;
+    }
+  }
+
+  throw new Error("Membership number allocation could not be completed.");
+}
+
 export async function getMemberByIdentifier(identifier: string) {
   const db = await getDb();
   if (!db) return undefined;

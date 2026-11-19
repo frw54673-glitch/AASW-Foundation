@@ -74,6 +74,16 @@ export async function dispatchVolunteerApplicationNotification(input: VolunteerN
   try {
     const smtp = smtpConfig();
     await dependencies.deliver({ to: smtp.user, ...createVolunteerApplicationNotification(input) });
+    if (dependencies.deliver === deliverWithFoundationGmail) {
+      const safeName = escapeHtml(input.fullName);
+      const safeRef = escapeHtml(input.applicationRef);
+      await deliverWithFoundationGmail({
+        to: input.email,
+        subject: `Volunteer application received · ${input.applicationRef}`,
+        text: `Dear ${input.fullName},\n\nThank you for applying to volunteer with AASW Foundation.\n\nApplication reference: ${input.applicationRef}\n\nOur team will review your application and send an update by email.\n\nAASW Foundation\nRura, Kanpur Dehat, Uttar Pradesh 209303`,
+        html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation · Volunteer application</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:28px;font-weight:400">Application received.</h1><p style="margin:18px 0 0;color:#584744;font-size:15px;line-height:1.7">Dear ${safeName}, thank you for offering your time to AASW Foundation. Our team will review your application and update you by email.</p><p style="margin:18px 0 0;padding:14px 16px;background:#fffdf7;border-left:4px solid #d4820a;font-size:14px"><strong>Application reference:</strong> ${safeRef}</p><p style="margin:20px 0 0;color:#796966;font-size:12px">AASW Foundation · Rura, Kanpur Dehat, Uttar Pradesh 209303</p></section></main></body></html>`,
+      }).catch(err => console.warn("[Volunteer] Applicant acknowledgement email could not be sent:", err));
+    }
     return "sent" as const;
   } catch (error) {
     return { status: "failed" as const, error: error instanceof Error ? error.message : "Unknown volunteer notification error." };

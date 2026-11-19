@@ -10,6 +10,8 @@ import { createMembershipRenewalShareBadgeFile } from "@/lib/membershipRenewalSh
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PaymentDemoButton } from "@/components/PaymentDemoCheckout";
+import { loadRazorpayCheckoutScript } from "@/lib/razorpayCheckout";
+import { resolvePaymentGatewayMode } from "@shared/payment-demo";
 
 type MembershipType = "annual" | "lifetime";
 type ProofType = "aadhaar" | "voter_id" | "passport" | "driving_licence" | "other";
@@ -142,10 +144,12 @@ export function MembershipApplicationForm() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [reference, setReference] = useState<string | null>(null);
   const [membershipNo, setMembershipNo] = useState<string | null>(null);
+  const [verifiedPaymentId, setVerifiedPaymentId] = useState<string | null>(null);
   const [selectedMembershipType, setSelectedMembershipType] = useState<MembershipType>("annual");
   const [checkoutSupporter, setCheckoutSupporter] = useState<{ name: string; email: string; phone: string } | null>(null);
   const [completedAsRenewal, setCompletedAsRenewal] = useState(false);
   const [isPreparingSubmission, setIsPreparingSubmission] = useState(false);
+  const [isAwaitingPayment, setIsAwaitingPayment] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [renewalProgressReady, setRenewalProgressReady] = useState(!isRenewal);
   const [renewalProgressRestored, setRenewalProgressRestored] = useState(false);
@@ -185,11 +189,20 @@ export function MembershipApplicationForm() {
     else window.sessionStorage.removeItem(RENEWAL_PROGRESS_STORAGE_KEY);
   }, [form, isRenewal, renewalProgressReady]);
 
+  const liveStatus = trpc.payment.liveStatus.useQuery(undefined, { staleTime: 60_000 });
+  const isLivePayment = Boolean(liveStatus.data?.configured) || resolvePaymentGatewayMode(import.meta.env.VITE_PAYMENT_GATEWAY_MODE) === "razorpay";
+  const activeMembershipType: MembershipType = isRenewal ? "annual" : form.membershipType;
+  const activeFeeLabel = activeMembershipType === "lifetime" ? "₹10,000" : "₹1,100";
+
+  const startPaymentCheckout = trpc.membership.startPaymentCheckout.useMutation();
+  const confirmPaymentCheckout = trpc.membership.confirmPaymentCheckout.useMutation();
+
   const submission = trpc.membership.submit.useMutation({
     onSuccess: (result, variables) => {
       const renewalRecorded = Boolean(result.renewal);
       setReference(result.applicationRef);
       setMembershipNo(result.membershipNo);
+      setVerifiedPaymentId(null);
       setSelectedMembershipType(variables.membershipType);
       setCheckoutSupporter({ name: variables.fullName, email: variables.email, phone: variables.phone });
       setCompletedAsRenewal(renewalRecorded);
@@ -199,6 +212,7 @@ export function MembershipApplicationForm() {
       setErrors({});
       setSubmissionError(null);
       setConfirmationProgress("idle");
+      setReviewOpen(false);
       notifySuccess(
         renewalRecorded ? "Membership renewal recorded" : "Membership account activated",
         renewalRecorded ? `Your Member ID ${result.membershipNo} remains connected to your existing account.` : `Your Member ID is ${result.membershipNo}.`,
@@ -208,11 +222,12 @@ export function MembershipApplicationForm() {
       const readableMessage = membershipSubmissionErrorMessage(error.message, isRenewal);
       setSubmissionError(readableMessage);
       setConfirmationProgress("idle");
+      setReviewOpen(false);
       notifyError(isRenewal ? "Renewal could not be recorded" : "Membership application could not be submitted", readableMessage);
     },
   });
 
-  const isSubmitting = submission.isPending || isPreparingSubmission;
+  const isSubmitting = submission.isPending || startPaymentCheckout.isPending || confirmPaymentCheckout.isPending || isPreparingSubmission || isAwaitingPayment;
   const modalProcessing = isSubmitting || confirmationProgress !== "idle";
   const copyMembershipId = async () => {
     if (!membershipNo) return;
@@ -333,14 +348,14 @@ export function MembershipApplicationForm() {
 
     setConfirmationProgress("confirmed");
     await new Promise<void>((resolve) => window.setTimeout(resolve, 260));
-    submission.mutate({
+    const payload = {
       fullName: form.fullName,
       email: form.email,
       phone: form.phone,
       city: form.city,
       state: form.state,
       district: form.district,
-      membershipType: isRenewal ? "annual" : form.membershipType,
+      membershipType: isRenewal ? ("annual" as const) : form.membershipType,
       renewalIntent: isRenewal,
       panNumber: form.panNumber.toUpperCase(),
       idProof: {
@@ -350,9 +365,117 @@ export function MembershipApplicationForm() {
         dataBase64,
       },
       message: form.message.trim() || undefined,
-      privacyConsent: true,
+      privacyConsent: true as const,
       website: form.website || undefined,
-    });
+    };
+
+    if (!isLivePayment) {
+      submission.mutate(payload);
+      return;
+    }
+
+    // Live Razorpay flow: payment MUST succeed & be verified on server BEFORE
+    // any Member account or Membership ID is created.
+    try {
+      const order = await startPaymentCheckout.mutateAsync(payload);
+      await loadRazorpayCheckoutScript();
+      if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable. Please retry.");
+
+      // Close review dialog before launching Razorpay so the payment popup is
+      // cleanly interactive on top of the page.
+      setReviewOpen(false);
+      setIsAwaitingPayment(true);
+      let paymentHandled = false;
+
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: "AASW Foundation",
+        description: payload.membershipType === "lifetime" ? "AASW Lifetime Membership (₹10,000)" : "AASW Annual Membership (₹1,100)",
+        order_id: order.orderId,
+        prefill: {
+          name: payload.fullName.trim(),
+          email: payload.email.trim(),
+          contact: payload.phone.replace(/[\s()-]/g, ""),
+        },
+        notes: {
+          applicationRef: order.applicationRef,
+          receipt: order.receipt,
+          kind: "membership",
+          membershipType: payload.membershipType,
+        },
+        theme: { color: "#2f6b52" },
+        handler: async (payment) => {
+          paymentHandled = true;
+          try {
+            const result = await confirmPaymentCheckout.mutateAsync({
+              applicationRef: order.applicationRef,
+              razorpayOrderId: payment.razorpay_order_id,
+              razorpayPaymentId: payment.razorpay_payment_id,
+              razorpaySignature: payment.razorpay_signature,
+              renewalIntent: isRenewal,
+            });
+            const renewalRecorded = Boolean(result.renewal);
+            setReference(result.applicationRef);
+            setMembershipNo(result.membershipNo);
+            setVerifiedPaymentId(result.paymentId);
+            setSelectedMembershipType(payload.membershipType);
+            setCheckoutSupporter(null);
+            setCompletedAsRenewal(renewalRecorded);
+            setRenewalRecordedAt(renewalRecorded ? new Date().toISOString() : null);
+            setForm(initialState);
+            if (idProofInputRef.current) idProofInputRef.current.value = "";
+            window.sessionStorage.removeItem(RENEWAL_PROGRESS_STORAGE_KEY);
+            setErrors({});
+            setSubmissionError(null);
+            setConfirmationProgress("idle");
+            setIsAwaitingPayment(false);
+            notifySuccess(
+              renewalRecorded ? "Payment verified · Membership renewed" : "Payment verified · Membership activated",
+              `Your Member ID is ${result.membershipNo}. Payment ID: ${result.paymentId}`,
+            );
+          } catch (confirmError) {
+            const msg = confirmError instanceof Error
+              ? `${confirmError.message} If money was debited, contact AASW with payment ID ${payment.razorpay_payment_id}.`
+              : `Payment could not be verified. Contact AASW with payment ID ${payment.razorpay_payment_id}.`;
+            setSubmissionError(msg);
+            setConfirmationProgress("idle");
+            setIsAwaitingPayment(false);
+            notifyError("Payment verification failed", msg);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            if (paymentHandled) return;
+            const msg = "Payment was cancelled before completion. No Membership ID has been issued and your account was not activated.";
+            setSubmissionError(msg);
+            setConfirmationProgress("idle");
+            setIsAwaitingPayment(false);
+            notifyWarning("Payment not completed", msg);
+          },
+        },
+      });
+
+      checkout.on("payment.failed", (response) => {
+        paymentHandled = true;
+        const msg = `${response.error?.description || "Razorpay could not complete this payment."} No Membership ID has been issued.`;
+        setSubmissionError(msg);
+        setConfirmationProgress("idle");
+        setIsAwaitingPayment(false);
+        notifyError("Payment failed", msg);
+      });
+
+      checkout.open();
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "Could not start membership payment.";
+      const readableMessage = membershipSubmissionErrorMessage(rawMessage, isRenewal);
+      setSubmissionError(readableMessage);
+      setConfirmationProgress("idle");
+      setIsAwaitingPayment(false);
+      setReviewOpen(false);
+      notifyError(isRenewal ? "Renewal payment could not start" : "Membership payment could not start", readableMessage);
+    }
   };
 
   const confirmReviewSubmission = async () => {
@@ -373,13 +496,14 @@ export function MembershipApplicationForm() {
           <dl>
             <div><dt>Membership ID</dt><dd className="membership-id-value"><span>{membershipNo}</span>{completedAsRenewal && <button type="button" className="membership-id-copy" onClick={() => void copyMembershipId()} aria-label="Copy Membership ID">{membershipIdCopied ? <Check size={14} /> : <Clipboard size={14} />}{membershipIdCopied ? "Copied" : "Copy"}</button>}</dd></div>
             <div><dt>Application reference</dt><dd>{reference}</dd></div>
+            {verifiedPaymentId && <div><dt>Verified Payment ID</dt><dd>{verifiedPaymentId}</dd></div>}
             <div><dt>Selected path</dt><dd>{selectedMembershipType === "annual" ? "Annual membership" : "Lifetime membership"}</dd></div>
           </dl>
           {!completedAsRenewal && <p className="membership-success-note">The password-setup link expires after 72 hours. Do not share it with anyone.</p>}
-          {checkoutSupporter && <div className="membership-payment-next"><p className="section-kicker">Membership contribution</p><p>Complete your {selectedMembershipType === "annual" ? "₹1,100 annual" : "₹10,000 lifetime"} membership contribution securely with Razorpay.</p><PaymentDemoButton kind="membership" initialAmount={selectedMembershipType === "annual" ? 1100 : 10000} supporter={checkoutSupporter} className="button button-ochre" label="Pay membership contribution" /></div>}
+          {checkoutSupporter && !verifiedPaymentId && <div className="membership-payment-next"><p className="section-kicker">Membership contribution</p><p>Complete your {selectedMembershipType === "annual" ? "₹1,100 annual" : "₹10,000 lifetime"} membership contribution securely with Razorpay.</p><PaymentDemoButton kind="membership" initialAmount={selectedMembershipType === "annual" ? 1100 : 10000} supporter={checkoutSupporter} className="button button-ochre" label="Pay membership contribution" /></div>}
           <a className="text-link" href="/member/login">{completedAsRenewal ? "Open your Member Portal" : "Open Member Login"} <Send size={15} /></a>
           {completedAsRenewal && <div className="membership-renewal-success-actions">{renewalRecordedAt && <button type="button" className="button button-primary membership-renewal-receipt" onClick={() => downloadMembershipRenewalReceiptPdf({ membershipNo, applicationRef: reference, recordedAt: renewalRecordedAt })}><Download size={16} />Download renewal PDF receipt</button>}<button type="button" className="membership-renewal-share" onClick={() => void downloadRenewalShareBadge()}><ImageDown size={16} />{badgeDownloaded ? "Share badge downloaded" : "Download share badge"}</button><button type="button" className="membership-renewal-share" onClick={() => void shareRenewalStatus()}><Share2 size={16} />{renewalShared ? "Shared renewal status" : "Share renewal status"}</button></div>}
-          <button type="button" className="text-link" onClick={() => { setReference(null); setMembershipNo(null); setCompletedAsRenewal(false); setRenewalRecordedAt(null); }}>Submit another application <Send size={15} /></button>
+          <button type="button" className="text-link" onClick={() => { setReference(null); setMembershipNo(null); setVerifiedPaymentId(null); setCompletedAsRenewal(false); setRenewalRecordedAt(null); }}>Submit another application <Send size={15} /></button>
         </div>
       </section>
     );
@@ -421,11 +545,11 @@ export function MembershipApplicationForm() {
           <label className="member-form-consent"><input type="checkbox" checked={form.privacyConsent} onChange={(event) => update("privacyConsent", event.target.checked)} onBlur={() => validateField("privacyConsent")} aria-invalid={Boolean(errors.privacyConsent)} aria-describedby={errors.privacyConsent ? "membership-consent-error" : undefined} disabled={isSubmitting} /><span>I agree that AASW Foundation may use these details and private ID-proof document to process and respond to this membership application, in line with the <a href="/privacy">Privacy Policy</a>. <b>*</b></span></label>
           <FieldError id="membership-consent-error" message={errors.privacyConsent} />
           {submissionError && <p id="membership-submit-error" className="member-form-error" role="alert"><AlertCircle size={17} />{submissionError}</p>}
-          {isSubmitting && <p className="membership-submit-progress" role="status"><Loader2 size={16} className="member-form-spinner" /><span>{isPreparingSubmission ? "Preparing your private ID-proof file…" : isRenewal ? "Securely checking your membership and recording the renewal…" : "Securely activating your membership account…"}</span></p>}
-          <div className="member-form-actions"><button className="button button-primary member-form-submit" type="submit" disabled={isSubmitting} aria-label={isSubmitting ? (isPreparingSubmission ? "Preparing ID proof for secure renewal submission" : "Recording membership renewal") : undefined}>{isSubmitting ? <><span className="member-submit-loader" aria-hidden="true"><Loader2 size={17} className="member-form-spinner" /></span><span>{isPreparingSubmission ? "Preparing ID proof" : isRenewal ? "Recording renewal" : "Activating membership"}</span><span className="member-submit-dots" aria-hidden="true"><i /><i /><i /></span></> : <>{isRenewal ? "Renew membership" : "Activate membership account"} <Send size={16} /></>}</button>{isRenewal && <button type="button" className="member-form-clear" onClick={clearRenewalForm} disabled={isSubmitting}><RotateCcw size={15} />Clear form</button>}</div>
-          <p className="member-form-note">{isRenewal ? "Your existing Member ID and history are only continued when the submitted email address and PAN match your account. This form does not collect payment." : "Submitting this form activates your member account and sends a one-time password-setup link. It does not collect payment."}</p>
+          {isSubmitting && <p className="membership-submit-progress" role="status"><Loader2 size={16} className="member-form-spinner" /><span>{isPreparingSubmission ? "Preparing your private ID-proof file…" : isAwaitingPayment ? "Waiting for secure Razorpay payment confirmation…" : confirmPaymentCheckout.isPending ? "Verifying payment and activating your Membership ID…" : isRenewal ? "Securely checking your membership and preparing renewal…" : isLivePayment ? "Preparing secure Razorpay checkout…" : "Securely activating your membership account…"}</span></p>}
+          <div className="member-form-actions"><button className="button button-primary member-form-submit" type="submit" disabled={isSubmitting} aria-label={isSubmitting ? (isPreparingSubmission ? "Preparing ID proof for secure renewal submission" : "Recording membership renewal") : undefined}>{isSubmitting ? <><span className="member-submit-loader" aria-hidden="true"><Loader2 size={17} className="member-form-spinner" /></span><span>{isPreparingSubmission ? "Preparing ID proof" : isAwaitingPayment ? "Complete payment in Razorpay" : confirmPaymentCheckout.isPending ? "Activating membership" : isLivePayment ? "Opening Razorpay" : isRenewal ? "Recording renewal" : "Activating membership"}</span><span className="member-submit-dots" aria-hidden="true"><i /><i /><i /></span></> : <>{isLivePayment ? (isRenewal ? `Renew & pay ${activeFeeLabel}` : `Proceed to payment · ${activeFeeLabel}`) : (isRenewal ? "Renew membership" : "Activate membership account")} <Send size={16} /></>}</button>{isRenewal && <button type="button" className="member-form-clear" onClick={clearRenewalForm} disabled={isSubmitting}><RotateCcw size={15} />Clear form</button>}</div>
+          <p className="member-form-note">{isLivePayment ? "Your Membership ID and Member Portal account are activated ONLY after your Razorpay payment is completed and verified." : isRenewal ? "Your existing Member ID and history are only continued when the submitted email address and PAN match your account. This form does not collect payment." : "Submitting this form activates your member account and sends a one-time password-setup link. It does not collect payment."}</p>
         </form>
-        <Dialog open={reviewOpen} onOpenChange={(open) => { if (!modalProcessing) { setReviewOpen(open); if (!open) setConfirmationProgress("idle"); } }}><DialogContent className="renewal-review-dialog" onPointerDownOutside={(event) => { if (modalProcessing) event.preventDefault(); }} onEscapeKeyDown={(event) => { if (modalProcessing) event.preventDefault(); }}><DialogHeader><p className="section-kicker">Final review</p><DialogTitle>{isRenewal ? "Check before recording your renewal." : "Check before activating your membership."}</DialogTitle><DialogDescription>Review the details below before secure processing. For privacy, PAN and the uploaded ID-proof file are not shown here.</DialogDescription></DialogHeader><dl className="renewal-review-list renewal-review-list-grid"><div><dt>Full name</dt><dd>{form.fullName}</dd></div><div><dt>Email</dt><dd>{form.email}</dd></div><div><dt>Phone</dt><dd>{form.phone}</dd></div><div><dt>Location</dt><dd>{[form.district, form.city, form.state].filter(Boolean).join(", ")}</dd></div><div><dt>Membership path</dt><dd>{isRenewal ? "Annual renewal" : form.membershipType === "annual" ? "Annual membership" : "Lifetime membership"}</dd></div><div><dt>ID-proof type</dt><dd>{form.idProofType.replaceAll("_", " ")}</dd></div></dl><p className="renewal-review-privacy"><LockKeyhole size={15} />Your exact PAN and private ID proof stay out of this review panel.</p><DialogFooter><button type="button" className="renewal-review-edit" onClick={returnToFormDetails} disabled={modalProcessing}><PencilLine size={15} />Edit details</button><button type="button" className="button button-primary renewal-review-confirm" onClick={() => void confirmReviewSubmission()} disabled={modalProcessing} aria-busy={modalProcessing}>{confirmationProgress === "processing" ? <><Loader2 size={16} className="member-form-spinner" />Checking details</> : confirmationProgress === "confirmed" ? <><Check size={16} />Details confirmed</> : <><LockKeyhole size={16} />{isRenewal ? "Confirm & renew" : "Confirm & activate"}</>}</button></DialogFooter></DialogContent></Dialog>
+        <Dialog open={reviewOpen} onOpenChange={(open) => { if (!modalProcessing) { setReviewOpen(open); if (!open) setConfirmationProgress("idle"); } }}><DialogContent className="renewal-review-dialog" onPointerDownOutside={(event) => { if (modalProcessing) event.preventDefault(); }} onEscapeKeyDown={(event) => { if (modalProcessing) event.preventDefault(); }}><DialogHeader><p className="section-kicker">Final review</p><DialogTitle>{isLivePayment ? `Review & pay ${activeFeeLabel} with Razorpay.` : isRenewal ? "Check before recording your renewal." : "Check before activating your membership."}</DialogTitle><DialogDescription>Review the details below before secure processing. For privacy, PAN and the uploaded ID-proof file are not shown here.</DialogDescription></DialogHeader><dl className="renewal-review-list renewal-review-list-grid"><div><dt>Full name</dt><dd>{form.fullName}</dd></div><div><dt>Email</dt><dd>{form.email}</dd></div><div><dt>Phone</dt><dd>{form.phone}</dd></div><div><dt>Location</dt><dd>{[form.district, form.city, form.state].filter(Boolean).join(", ")}</dd></div><div><dt>Membership path</dt><dd>{isRenewal ? "Annual renewal · ₹1,100" : form.membershipType === "annual" ? "Annual membership · ₹1,100" : "Lifetime membership · ₹10,000"}</dd></div><div><dt>ID-proof type</dt><dd>{form.idProofType.replaceAll("_", " ")}</dd></div></dl><p className="renewal-review-privacy"><LockKeyhole size={15} />Your exact PAN and private ID proof stay out of this review panel.</p><DialogFooter><button type="button" className="renewal-review-edit" onClick={returnToFormDetails} disabled={modalProcessing}><PencilLine size={15} />Edit details</button><button type="button" className="button button-primary renewal-review-confirm" onClick={() => void confirmReviewSubmission()} disabled={modalProcessing} aria-busy={modalProcessing}>{confirmationProgress === "processing" ? <><Loader2 size={16} className="member-form-spinner" />Checking details</> : confirmationProgress === "confirmed" ? <><Check size={16} />{isLivePayment ? "Opening Razorpay…" : "Details confirmed"}</> : <><LockKeyhole size={16} />{isLivePayment ? `Confirm & pay ${activeFeeLabel}` : isRenewal ? "Confirm & renew" : "Confirm & activate"}</>}</button></DialogFooter></DialogContent></Dialog>
         {isRenewal && <RenewalTroubleshootingFaq />}
       </div>
     </section>

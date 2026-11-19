@@ -23,7 +23,7 @@ const { dispatchVerifiedPaymentReceipt, dispatchRefundProcessedEmail, createRazo
 vi.mock("./db", () => ({ createPaymentTransaction, getPaymentRefundByGatewayRefundId, getPaymentRefundsByReceipt, getPaymentTransactionByGatewayOrderId, getPaymentTransactionByReceipt, listPaymentRefunds, markPaymentRefundNotified, markPaymentRefundProcessed, markPaymentTransactionStatus, recordPaymentRefundInitiated }));
 vi.mock("./email/receipt", () => ({ dispatchVerifiedPaymentReceipt }));
 vi.mock("./email/refundNotification", () => ({ dispatchRefundProcessedEmail }));
-vi.mock("./payments/razorpay", () => ({ createRazorpayOrder, createRazorpayRefund, getRazorpayConfig: () => ({ keyId: "rzp_test", keySecret: "secret" }), verifyRazorpayCheckoutSignature: vi.fn() }));
+vi.mock("./payments/razorpay", () => ({ captureRazorpayPayment: vi.fn(), createRazorpayOrder, createRazorpayRefund, fetchRazorpayPayment: vi.fn(), getRazorpayConfig: () => ({ keyId: "rzp_test", keySecret: "secret" }), verifyRazorpayCheckoutSignature: vi.fn() }));
 
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";

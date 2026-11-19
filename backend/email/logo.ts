@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Email clients (Gmail in particular) proxy and block images served from the
  * app origin — a localhost URL is unreachable from any recipient's mail
@@ -7,9 +8,12 @@ import { resolve } from "node:path";
  * attachment instead of a remote URL. */
 export const AASW_LOGO_CID = "aasw-foundation-logo";
 
+const baseDir = typeof import.meta.dirname === "string" ? import.meta.dirname : dirname(fileURLToPath(import.meta.url));
 const LOGO_CANDIDATES = [
   resolve(process.cwd(), "frontend/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
   resolve(process.cwd(), "dist/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
+  resolve(baseDir, "../../frontend/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
+  resolve(baseDir, "../public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
 ];
 
 /** Nodemailer attachment carrying the official logo for inline (cid:) use. */

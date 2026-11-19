@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 type DonationNotificationInput = { donationRef: string; fullName: string; email: string; phone: string; amount: number; state: string; city: string };
 type Dependencies = { deliver: (mail: { to: string; subject: string; text: string; html: string }) => Promise<{ messageId?: string }> };
 
-function escapeHtml(value: string) { return value.replace(/[&<'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character); }
+function escapeHtml(value: string) { return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character); }
 function smtpConfig() { const host = process.env.SMTP_HOST; const port = Number(process.env.SMTP_PORT); const user = process.env.SMTP_USER; const pass = process.env.SMTP_APP_PASSWORD; if (!host || !port || !user || !pass) throw new Error("Foundation notification sender is not configured."); return { host, port, user, pass }; }
 async function deliverWithFoundationGmail(mail: { to: string; subject: string; text: string; html: string }) { const smtp = smtpConfig(); const transport = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } }); return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail }); }
 

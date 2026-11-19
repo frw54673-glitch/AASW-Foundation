@@ -10,6 +10,8 @@ const rules: Record<string, RateLimitRule> = {
   "member.setupPassword": { id: "member.setupPassword", maxAttempts: 5, windowMs: 15 * 60 * 1000 },
   "member.resetPassword": { id: "member.resetPassword", maxAttempts: 5, windowMs: 15 * 60 * 1000 },
   "membership.submit": { id: "membership.submit", maxAttempts: 8, windowMs: 60 * 60 * 1000 },
+  "membership.startPaymentCheckout": { id: "membership.startPaymentCheckout", maxAttempts: 12, windowMs: 15 * 60 * 1000 },
+  "membership.confirmPaymentCheckout": { id: "membership.confirmPaymentCheckout", maxAttempts: 12, windowMs: 15 * 60 * 1000 },
   "volunteer.submit": { id: "volunteer.submit", maxAttempts: 8, windowMs: 60 * 60 * 1000 },
   "contact.submit": { id: "contact.submit", maxAttempts: 8, windowMs: 60 * 60 * 1000 },
   "newsletter.subscribe": { id: "newsletter.subscribe", maxAttempts: 8, windowMs: 60 * 60 * 1000 },

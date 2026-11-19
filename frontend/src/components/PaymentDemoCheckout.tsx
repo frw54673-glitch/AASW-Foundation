@@ -3,29 +3,11 @@ import { Check, ChevronRight, CreditCard, Landmark, LoaderCircle, ShieldCheck, S
 import { DONATION_PRESETS, formatINR, MEMBERSHIP_OPTIONS, resolveDemoAmount, resolvePaymentGatewayMode, type PaymentKind } from "@shared/payment-demo";
 import { createCheckoutGateway } from "@shared/checkout-gateway";
 import { trpc } from "@/lib/trpc";
+import { loadRazorpayCheckoutScript } from "@/lib/razorpayCheckout";
 import { useLocation } from "wouter";
 
 type PaymentDemoButtonProps = { kind: PaymentKind; initialAmount: number; className?: string; label: string; supporter?: { name: string; email: string; phone: string } };
 type CheckoutState = "details" | "processing" | "failed";
-type RazorpaySuccess = { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string };
-type RazorpayOptions = {
-  key: string; amount: number; currency: string; name: string; description: string; order_id: string;
-  prefill: { name: string; email: string; contact: string }; notes: { receipt: string; kind: PaymentKind };
-  theme: { color: string }; handler: (result: RazorpaySuccess) => void; modal: { ondismiss: () => void };
-};
-type RazorpayInstance = { open: () => void; on: (event: "payment.failed", callback: (response: { error?: { description?: string } }) => void) => void };
-declare global { interface Window { Razorpay?: new (options: RazorpayOptions) => RazorpayInstance } }
-
-function loadRazorpay(): Promise<void> {
-  if (window.Razorpay) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    let script = document.querySelector<HTMLScriptElement>('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
-    if (!script) { script = document.createElement("script"); script.src = "https://checkout.razorpay.com/v1/checkout.js"; script.async = true; document.body.appendChild(script); }
-    script.addEventListener("load", () => window.Razorpay ? resolve() : reject(new Error("Razorpay Checkout did not load.")), { once: true });
-    script.addEventListener("error", () => reject(new Error("Could not load Razorpay Checkout. Check your connection and try again.")), { once: true });
-    if (window.Razorpay) resolve();
-  });
-}
 
 export function PaymentDemoButton({ kind, initialAmount, className = "button button-ochre", label, supporter }: PaymentDemoButtonProps) {
   const [, navigate] = useLocation();
@@ -44,7 +26,8 @@ export function PaymentDemoButton({ kind, initialAmount, className = "button but
   const amount = useMemo(() => isCustom ? Number(customAmount) : selectedAmount, [customAmount, isCustom, selectedAmount]);
   const formattedAmount = resolveDemoAmount(kind, amount) ? formatINR(amount) : "—";
   const itemLabel = kind === "membership" ? "Membership" : "Donation";
-  const gatewayMode = resolvePaymentGatewayMode(import.meta.env.VITE_PAYMENT_GATEWAY_MODE);
+  const liveStatus = trpc.payment.liveStatus.useQuery(undefined, { staleTime: 60_000 });
+  const gatewayMode = liveStatus.data?.configured ? "razorpay" : resolvePaymentGatewayMode(import.meta.env.VITE_PAYMENT_GATEWAY_MODE);
   const isLive = gatewayMode === "razorpay";
   const checkoutGateway = useMemo(() => createCheckoutGateway(gatewayMode), [gatewayMode]);
   const createOrder = trpc.payment.createOrder.useMutation();
@@ -58,7 +41,10 @@ export function PaymentDemoButton({ kind, initialAmount, className = "button but
   }, [open, step]);
 
   const openCheckout = () => {
-    setOpen(true); setStep("details"); setSelectedAmount(initialAmount); setIsCustom(false); setCustomAmount("");
+    const isPresetDonation = kind === "donation" && (DONATION_PRESETS as readonly number[]).includes(initialAmount);
+    const shouldUseCustom = kind === "donation" && !isPresetDonation && initialAmount > 0;
+    setOpen(true); setStep("details"); setSelectedAmount(shouldUseCustom ? DONATION_PRESETS[0] : initialAmount);
+    setIsCustom(shouldUseCustom); setCustomAmount(shouldUseCustom ? String(initialAmount) : "");
     setSimulateFailure(false); setFailureMessage(""); setError(""); setName(supporter?.name ?? "");
     setEmail(supporter?.email ?? ""); setPhone(supporter?.phone ?? "");
   };
@@ -82,12 +68,12 @@ export function PaymentDemoButton({ kind, initialAmount, className = "button but
     }
     try {
       const order = await createOrder.mutateAsync({ kind, amount: validAmount, supporterName: name.trim(), supporterEmail: email.trim(), supporterPhone: phone.trim() || undefined });
-      await loadRazorpay();
+      await loadRazorpayCheckoutScript();
       if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable. Please retry.");
       const checkout = new window.Razorpay({
         key: order.keyId, amount: order.amount, currency: order.currency, name: "AASW Foundation",
         description: kind === "membership" ? "AASW Foundation membership" : "AASW Foundation donation",
-        order_id: order.orderId, prefill: { name: name.trim(), email: email.trim(), contact: phone.trim() },
+        order_id: order.orderId, prefill: { name: name.trim(), email: email.trim(), contact: phone.replace(/[\s()-]/g, "") },
         notes: { receipt: order.receipt, kind }, theme: { color: "#2f6b52" },
         handler: async (payment) => {
           try {

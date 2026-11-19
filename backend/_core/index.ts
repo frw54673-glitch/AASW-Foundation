@@ -85,6 +85,7 @@ async function ensureDatabaseRunning() {
         detached: true,
         stdio: "ignore",
         windowsHide: true,
+        shell: process.platform === "win32",
       });
       dbProc.on("error", error => console.error("[AutoDB] Database bootstrap could not start:", error));
       dbProc.unref();

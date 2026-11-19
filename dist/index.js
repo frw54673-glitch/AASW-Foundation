@@ -932,6 +932,11 @@ async function createPaymentTransaction(transaction) {
   if (!db) throw new Error("Database is unavailable for payment transaction creation.");
   await db.insert(paymentTransactions).values(transaction);
 }
+async function createMembershipApplication(application) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for membership application submission.");
+  await db.insert(membershipApplications).values(application);
+}
 function membershipCycleDates(memberType, joiningDate) {
   const validity = getMembershipValidity(memberType, joiningDate, joiningDate);
   return { startsOn: joiningDate, expiresOn: validity.expiresOn };
@@ -998,6 +1003,109 @@ async function createMembershipApplicationWithActivation(input) {
         await tx.insert(memberMembershipCycles).values({ memberId, applicationRef: input.application.applicationRef, cycleNumber: 1, membershipType: input.application.membershipType, ...cycleDates, status: "active" });
         await tx.insert(accountSetupTokens).values({ memberId, tokenHash: input.setupTokenHash, expiresAt: input.setupTokenExpiresAt });
         await tx.insert(foundationAdminAlerts).values({ alertType: "member_auto_approved", applicationRef: input.application.applicationRef, memberId, title: "New member auto-approved", message: `${input.application.fullName} \xB7 ${membershipNo} is ready to set a member password.` });
+        return { memberId, membershipNo, isRenewal: false };
+      });
+    } catch (error) {
+      if (attempt < 2 && isDuplicateKeyError(error)) continue;
+      throw error;
+    }
+  }
+  throw new Error("Membership number allocation could not be completed.");
+}
+async function assertMembershipEligibility(input) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for membership verification.");
+  const [existing] = await db.select({
+    member: members,
+    applicationId: membershipApplications.id,
+    panHash: membershipApplications.panHash,
+    panEncrypted: membershipApplications.panEncrypted
+  }).from(members).innerJoin(membershipApplications, eq(members.applicationRef, membershipApplications.applicationRef)).where(eq(members.email, input.email)).limit(1);
+  if (existing) {
+    const verifiedPanHash = existing.panHash || hashSensitiveMatchValue(decryptSensitiveValue(existing.panEncrypted));
+    if (verifiedPanHash !== input.panHash) throw new Error("Membership renewal identity did not match.");
+    const now = /* @__PURE__ */ new Date();
+    const validity = getMembershipValidity(existing.member.memberType, existing.member.joiningDate, now);
+    if (existing.member.status === "active" && existing.member.accountStatus === "active" && validity.membershipStatus === "active") {
+      throw new Error("An active membership already exists for this email.");
+    }
+    return { existingMemberId: existing.member.id, isRenewal: true };
+  }
+  if (input.renewalIntent) throw new Error("No existing membership found for this renewal email.");
+  return { existingMemberId: null, isRenewal: false };
+}
+async function getMembershipApplicationByRef(applicationRef) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const rows = await db.select().from(membershipApplications).where(eq(membershipApplications.applicationRef, applicationRef)).limit(1);
+  return rows[0];
+}
+async function activateMembershipFromExistingApplication(input) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable for membership activation.");
+  const year = (/* @__PURE__ */ new Date()).getUTCFullYear();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await db.transaction(async (tx) => {
+        const [application] = await tx.select().from(membershipApplications).where(eq(membershipApplications.applicationRef, input.applicationRef)).limit(1);
+        if (!application) throw new Error("Membership application was not found.");
+        const [alreadyActivated] = await tx.select().from(members).where(eq(members.applicationRef, input.applicationRef)).limit(1);
+        if (alreadyActivated && application.status === "approved") {
+          return { memberId: alreadyActivated.id, membershipNo: alreadyActivated.membershipNo, isRenewal: Boolean(input.renewalIntent) };
+        }
+        const [existing] = await tx.select({
+          member: members,
+          applicationId: membershipApplications.id,
+          panHash: membershipApplications.panHash,
+          panEncrypted: membershipApplications.panEncrypted
+        }).from(members).innerJoin(membershipApplications, eq(members.applicationRef, membershipApplications.applicationRef)).where(eq(members.email, application.email)).limit(1);
+        const now = /* @__PURE__ */ new Date();
+        await tx.update(membershipApplications).set({ status: "approved", updatedAt: now }).where(eq(membershipApplications.applicationRef, input.applicationRef));
+        if (existing) {
+          const appPanHash = application.panHash || hashSensitiveMatchValue(decryptSensitiveValue(application.panEncrypted));
+          const verifiedPanHash = existing.panHash || hashSensitiveMatchValue(decryptSensitiveValue(existing.panEncrypted));
+          if (verifiedPanHash !== appPanHash) throw new Error("Membership renewal identity did not match.");
+          if (!existing.panHash) await tx.update(membershipApplications).set({ panHash: verifiedPanHash, updatedAt: now }).where(eq(membershipApplications.id, existing.applicationId));
+          const validity = getMembershipValidity(existing.member.memberType, existing.member.joiningDate, now);
+          if (existing.member.status === "active" && existing.member.accountStatus === "active" && validity.membershipStatus === "active") {
+            throw new Error("An active membership already exists for this email.");
+          }
+          const [latestCycle] = await tx.select({ cycleNumber: memberMembershipCycles.cycleNumber }).from(memberMembershipCycles).where(eq(memberMembershipCycles.memberId, existing.member.id)).orderBy(desc(memberMembershipCycles.cycleNumber)).limit(1);
+          if (!latestCycle) {
+            const historical = membershipCycleDates(existing.member.memberType, new Date(existing.member.joiningDate));
+            await tx.insert(memberMembershipCycles).values({ memberId: existing.member.id, applicationRef: existing.member.applicationRef, cycleNumber: 1, membershipType: existing.member.memberType === "lifetime" ? "lifetime" : "annual", ...historical, status: "expired", expiredAt: now });
+          } else {
+            await tx.update(memberMembershipCycles).set({ status: "expired", expiredAt: now, updatedAt: now }).where(and(eq(memberMembershipCycles.memberId, existing.member.id), eq(memberMembershipCycles.status, "active")));
+          }
+          const cycleDates2 = membershipCycleDates(application.membershipType, now);
+          const nextCycleNumber = (latestCycle?.cycleNumber ?? 1) + 1;
+          await tx.update(members).set({ applicationRef: application.applicationRef, fullName: application.fullName, phone: application.phone, memberType: application.membershipType, city: application.city, state: application.state, district: application.district, joiningDate: now, status: "active", accountStatus: "active", loginAttempts: 0, lockedUntil: null, updatedAt: now }).where(eq(members.id, existing.member.id));
+          await tx.insert(memberMembershipCycles).values({ memberId: existing.member.id, applicationRef: application.applicationRef, cycleNumber: nextCycleNumber, membershipType: application.membershipType, ...cycleDates2, status: "active" });
+          await tx.insert(foundationAdminAlerts).values({ alertType: "member_auto_approved", applicationRef: application.applicationRef, memberId: existing.member.id, title: "Membership renewed (paid)", message: `${application.fullName} \xB7 ${existing.member.membershipNo} completed payment and renewed membership.` });
+          return { memberId: existing.member.id, membershipNo: existing.member.membershipNo, isRenewal: true };
+        }
+        if (input.renewalIntent) throw new Error("No existing membership found for this renewal email.");
+        const current = await tx.select({ membershipNo: members.membershipNo }).from(members).where(like(members.membershipNo, `AASW-${year}-%`)).orderBy(desc(members.membershipNo)).limit(1);
+        const membershipNo = nextMembershipNumber(current[0]?.membershipNo ?? null, year);
+        const created = await tx.insert(members).values({
+          applicationRef: application.applicationRef,
+          membershipNo,
+          fullName: application.fullName,
+          email: application.email,
+          phone: application.phone,
+          memberType: application.membershipType,
+          city: application.city,
+          state: application.state,
+          district: application.district,
+          passwordHash: input.passwordHash,
+          mustChangePassword: false,
+          joiningDate: now
+        });
+        const memberId = Number(created[0].insertId);
+        const cycleDates = membershipCycleDates(application.membershipType, now);
+        await tx.insert(memberMembershipCycles).values({ memberId, applicationRef: application.applicationRef, cycleNumber: 1, membershipType: application.membershipType, ...cycleDates, status: "active" });
+        await tx.insert(accountSetupTokens).values({ memberId, tokenHash: input.setupTokenHash, expiresAt: input.setupTokenExpiresAt });
+        await tx.insert(foundationAdminAlerts).values({ alertType: "member_auto_approved", applicationRef: application.applicationRef, memberId, title: "New member activated (paid)", message: `${application.fullName} \xB7 ${membershipNo} completed payment and activated membership.` });
         return { memberId, membershipNo, isRenewal: false };
       });
     } catch (error) {
@@ -2486,18 +2594,22 @@ var systemRouter = router({
 import bcrypt from "bcryptjs";
 import { TRPCError as TRPCError3 } from "@trpc/server";
 import { nanoid } from "nanoid";
-import { z as z2 } from "zod";
+import { z as z3 } from "zod";
 
 // backend/email/memberActivation.ts
 import nodemailer from "nodemailer";
 
 // backend/email/logo.ts
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 var AASW_LOGO_CID = "aasw-foundation-logo";
+var baseDir = typeof import.meta.dirname === "string" ? import.meta.dirname : dirname(fileURLToPath(import.meta.url));
 var LOGO_CANDIDATES = [
   resolve(process.cwd(), "frontend/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
-  resolve(process.cwd(), "dist/public/manus-storage/aasw-foundation-official-logo_41a4007d.png")
+  resolve(process.cwd(), "dist/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
+  resolve(baseDir, "../../frontend/public/manus-storage/aasw-foundation-official-logo_41a4007d.png"),
+  resolve(baseDir, "../public/manus-storage/aasw-foundation-official-logo_41a4007d.png")
 ];
 function aaswLogoAttachment() {
   const logoPath = LOGO_CANDIDATES.find((candidate) => existsSync(candidate)) ?? LOGO_CANDIDATES[0];
@@ -2640,7 +2752,7 @@ async function dispatchMemberPostGraceFollowUpEmail(input, dependencies = { deli
   }
 }
 function createMemberPasswordResetEmail(input) {
-  const safe = { membershipNo: escapeHtml(input.membershipNo), setupUrl: escapeHtml(input.setupUrl) };
+  const safe = { fullName: escapeHtml(input.fullName), membershipNo: escapeHtml(input.membershipNo), setupUrl: escapeHtml(input.setupUrl), logoUrl: logoSrc };
   return {
     subject: "AASW Foundation \u2014 Reset Your Member Password",
     text: `Dear ${input.fullName},
@@ -2655,7 +2767,7 @@ If you did not request this, you can ignore this email. Your existing password w
 
 AASW Foundation
 Do not reply to this email.`,
-    html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Member account</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:30px;font-weight:400">Reset your password.</h1><p style="margin:18px 0 0;color:#584744;line-height:1.65">A password reset was requested for your member account.</p><div style="margin:24px 0;padding:16px;background:#ffffff;border-left:3px solid #d4820a"><p style="margin:0;color:#796966;font-size:12px;letter-spacing:1px;text-transform:uppercase">Membership ID</p><p style="margin:7px 0 0;color:#291d1d;font-size:20px;font-weight:700">${safe.membershipNo}</p></div><a href="${safe.setupUrl}" style="display:inline-block;padding:13px 18px;background:#2f6b52;color:#fffdf7;font-size:13px;font-weight:700;text-decoration:none">Reset password</a><p style="margin:22px 0 0;color:#796966;font-size:12px;line-height:1.65">This secure link expires in 72 hours and can be used once. If you did not request a reset, ignore this email. Your existing password remains unchanged.</p><p style="margin:22px 0 0;padding-top:16px;border-top:1px solid #e5ddd4;color:#796966;font-size:11px;line-height:1.55">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303<br/>Do not reply to this email.</p></section></main></body></html>`
+    html: `<!doctype html><html lang="en"><body style="margin:0;background:#f6f0e6;color:#291d1d;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f0e6"><tr><td align="center" style="padding:28px 14px"><table role="presentation" width="620" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;background:#fffdf7;border:1px solid #e5ddd4"><tr><td style="padding:22px 30px;background:#174c3c"><img src="${safe.logoUrl}" width="46" height="46" alt="AASW Foundation" style="display:block;background:#fffdf7;padding:3px" /><p style="margin:10px 0 0;color:#eac06e;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">AASW Foundation \xB7 Member account</p></td></tr><tr><td style="padding:34px 30px"><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:30px;font-weight:400">Reset your password.</h1><p style="margin:18px 0 0;color:#584744;line-height:1.65">Dear ${safe.fullName}, a password reset was requested for your member account.</p><div style="margin:24px 0;padding:16px;background:#fffaf0;border-left:4px solid #d4820a"><p style="margin:0;color:#796966;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Membership ID</p><p style="margin:7px 0 0;color:#291d1d;font-size:20px;font-weight:700">${safe.membershipNo}</p></div><a href="${safe.setupUrl}" style="display:inline-block;padding:13px 18px;background:#174c3c;color:#fffdf7;font-size:13px;font-weight:700;text-decoration:none">Reset password</a><p style="margin:22px 0 0;color:#796966;font-size:12px;line-height:1.65">This secure link expires in 72 hours and can be used once. If you did not request a reset, ignore this email. Your existing password remains unchanged.</p><p style="margin:22px 0 0;padding-top:16px;border-top:1px solid #e5ddd4;color:#796966;font-size:11px;line-height:1.55">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303<br/>Do not reply to this email.</p></td></tr></table></td></tr></table></body></html>`
   };
 }
 async function dispatchMemberPasswordResetEmail(input, dependencies = { deliver: deliverWithFoundationGmail }) {
@@ -2719,6 +2831,205 @@ async function dispatchMembershipApplicationNotification(input, dependencies = {
   }
 }
 
+// backend/email/receipt.ts
+import nodemailer3 from "nodemailer";
+function escapeHtml3(value) {
+  return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
+}
+function formatAmount(amountInPaise) {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amountInPaise / 100);
+}
+function isVerifiedTransaction(transaction) {
+  return transaction.status === "verified" || transaction.status === "captured";
+}
+function isReceiptEligible(transaction) {
+  return isVerifiedTransaction(transaction) && transaction.receiptDeliveryStatus === "pending";
+}
+function createDonationReceiptMail(transaction) {
+  const label = transaction.kind === "membership" ? "membership contribution" : "donation";
+  const amount2 = formatAmount(transaction.amount);
+  const createdOn = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "long", year: "numeric" }).format(transaction.createdAt);
+  const supporterName = escapeHtml3(transaction.supporterName);
+  const receipt = escapeHtml3(transaction.receipt);
+  const safeAmount = escapeHtml3(amount2);
+  const paymentId = transaction.gatewayPaymentId ? escapeHtml3(transaction.gatewayPaymentId) : null;
+  return {
+    to: transaction.supporterEmail,
+    subject: `AASW Foundation receipt \xB7 ${transaction.receipt}`,
+    text: `Dear ${transaction.supporterName},
+
+Thank you for your ${label} to AASW Foundation.
+
+Receipt reference: ${transaction.receipt}
+${transaction.gatewayPaymentId ? `Payment ID: ${transaction.gatewayPaymentId}
+` : ""}Amount received: ${amount2}
+Date: ${createdOn}
+
+This receipt confirms your verified payment. For support, reply to this email or write to aaswfoundation06@gmail.com.
+
+AASW Foundation`,
+    html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:640px;margin:0 auto;padding:32px 20px"><section style="border-top:7px solid #2f6b52;background:#fffaf0;padding:34px 32px"><p style="margin:0 0 22px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">AASW Foundation \xB7 verified payment receipt</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:34px;font-weight:400;line-height:1.05">Thank you for standing with AASW.</h1><p style="margin:22px 0 0;color:#5c4b47;font-size:16px;line-height:1.7">Dear ${supporterName}, your ${label} has been verified. This email is your payment receipt.</p><div style="margin:28px 0;padding:20px;border:1px solid #d8cfc4;background:#fffdf7"><p style="margin:0 0 6px;color:#796966;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Receipt reference</p><p style="margin:0;color:#2f6b52;font-family:Georgia,serif;font-size:24px">${receipt}</p><table role="presentation" style="width:100%;margin-top:22px;border-collapse:collapse">${paymentId ? `<tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Payment ID</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${paymentId}</td></tr>` : ""}<tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Amount received</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:16px;font-weight:700;text-align:right">${safeAmount}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Payment date</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${escapeHtml3(createdOn)}</td></tr></table></div><p style="margin:0;color:#5c4b47;font-size:14px;line-height:1.65">For a question about this receipt, reply to this email or write to <a href="mailto:aaswfoundation06@gmail.com" style="color:#2f6b52">aaswfoundation06@gmail.com</a>.</p></section><p style="margin:18px 0 0;color:#796966;font-size:12px;line-height:1.5">AASW Foundation \xB7 Aapka Apna Social Welfare Foundation</p></main></body></html>`
+  };
+}
+function smtpConfig3() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_APP_PASSWORD;
+  if (!host || !port || !user || !pass) throw new Error("SMTP receipt sender is not configured.");
+  return { host, port, user, pass };
+}
+async function deliverWithFoundationGmail3(mail) {
+  const smtp = smtpConfig3();
+  const transport = nodemailer3.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
+  return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
+}
+async function dispatchVerifiedPaymentReceipt(transaction, dependencies = {
+  claim: claimPaymentReceiptDelivery,
+  markSent: markPaymentReceiptSent,
+  markFailed: markPaymentReceiptFailed,
+  deliver: deliverWithFoundationGmail3
+}) {
+  if (!isReceiptEligible(transaction)) return "skipped";
+  if (!await dependencies.claim(transaction.receipt)) return "skipped";
+  try {
+    const delivery = await dependencies.deliver(createDonationReceiptMail(transaction));
+    await dependencies.markSent(transaction.receipt, delivery.messageId ?? "smtp-message-id-unavailable");
+    if (dependencies.deliver === deliverWithFoundationGmail3) {
+      const smtp = smtpConfig3();
+      const label = transaction.kind === "membership" ? "membership payment" : "donation payment";
+      const amount2 = formatAmount(transaction.amount);
+      await deliverWithFoundationGmail3({
+        to: smtp.user,
+        subject: `Verified ${label} received \xB7 ${transaction.receipt}`,
+        text: `A verified ${label} has been received.
+
+Receipt: ${transaction.receipt}
+Payment ID: ${transaction.gatewayPaymentId ?? "N/A"}
+Amount: ${amount2}
+Supporter: ${transaction.supporterName}
+Email: ${transaction.supporterEmail}
+Phone: ${transaction.supporterPhone ?? "Not provided"}
+
+AASW Foundation`,
+        html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Verified payment alert</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:28px;font-weight:400">Verified ${escapeHtml3(label)} received.</h1><table role="presentation" style="width:100%;margin-top:20px;border-collapse:collapse"><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Receipt</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right;font-weight:700">${escapeHtml3(transaction.receipt)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Payment ID</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${escapeHtml3(transaction.gatewayPaymentId ?? "N/A")}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Amount</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right;font-weight:700">${escapeHtml3(amount2)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Supporter</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${escapeHtml3(transaction.supporterName)}<br/>${escapeHtml3(transaction.supporterEmail)}</td></tr></table></section></main></body></html>`
+      }).catch((err) => console.warn("[Payments] Admin payment alert could not be sent:", err));
+    }
+    return "sent";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown receipt delivery error.";
+    await dependencies.markFailed(transaction.receipt, message);
+    return "failed";
+  }
+}
+
+// backend/payments/razorpay.ts
+import { createHmac as createHmac2, timingSafeEqual } from "node:crypto";
+import { z as z2 } from "zod";
+var razorpayOrderSchema = z2.object({
+  id: z2.string().min(1),
+  amount: z2.number().int().positive(),
+  currency: z2.string().length(3),
+  status: z2.string()
+});
+var razorpayRefundSchema = z2.object({
+  id: z2.string().min(1),
+  amount: z2.number().int().nonnegative(),
+  status: z2.string(),
+  payment_id: z2.string().min(1)
+});
+var razorpayPaymentSchema = z2.object({
+  id: z2.string().min(1),
+  order_id: z2.string().min(1),
+  amount: z2.number().int().positive(),
+  currency: z2.string().length(3),
+  status: z2.string()
+});
+function getRazorpayConfig() {
+  const keyId = process.env.RAZORPAY_KEY_ID?.trim();
+  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
+  return keyId && keySecret ? { keyId, keySecret } : null;
+}
+function secureEqual(left, right) {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+function verifyRazorpayCheckoutSignature(orderId, paymentId, signature, secret) {
+  const expected = createHmac2("sha256", secret).update(`${orderId}|${paymentId}`).digest("hex");
+  return secureEqual(expected, signature);
+}
+function verifyRazorpayWebhookSignature(rawBody, signature, webhookSecret) {
+  const expected = createHmac2("sha256", webhookSecret).update(rawBody).digest("hex");
+  return secureEqual(expected, signature);
+}
+async function createRazorpayOrder(input) {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(`${config.keyId}:${config.keySecret}`).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Basic ${authorization}` },
+    body: JSON.stringify({
+      amount: input.amount,
+      currency: "INR",
+      receipt: input.receipt,
+      notes: { purpose: input.kind, source: "aasw-foundation-website" }
+    })
+  });
+  if (!response.ok) {
+    const text2 = await response.text();
+    throw new Error(`Razorpay order creation failed (${response.status}): ${text2.slice(0, 300)}`);
+  }
+  return razorpayOrderSchema.parse(await response.json());
+}
+async function fetchRazorpayPayment(paymentId) {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(config.keyId + ":" + config.keySecret).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/payments/" + encodeURIComponent(paymentId), {
+    headers: { Authorization: "Basic " + authorization },
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!response.ok) throw new Error("Razorpay payment lookup failed (" + response.status + ").");
+  return razorpayPaymentSchema.parse(await response.json());
+}
+async function captureRazorpayPayment(input) {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(config.keyId + ":" + config.keySecret).toString("base64");
+  const response = await fetch("https://api.razorpay.com/v1/payments/" + encodeURIComponent(input.paymentId) + "/capture", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Basic " + authorization },
+    body: JSON.stringify({ amount: input.amount, currency: input.currency }),
+    signal: AbortSignal.timeout(1e4)
+  });
+  if (!response.ok) {
+    const text2 = await response.text().catch(() => "");
+    throw new Error(`Razorpay payment capture failed (${response.status}): ${text2.slice(0, 200)}`);
+  }
+  return razorpayPaymentSchema.parse(await response.json());
+}
+async function createRazorpayRefund(input) {
+  const config = getRazorpayConfig();
+  if (!config) throw new Error("Razorpay live credentials are not configured.");
+  const authorization = Buffer.from(`${config.keyId}:${config.keySecret}`).toString("base64");
+  const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(input.paymentId)}/refund`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Basic ${authorization}` },
+    body: JSON.stringify({
+      amount: input.amount,
+      speed: "normal",
+      notes: { source: "aasw-foundation-website", ...input.reason ? { reason: input.reason.slice(0, 200) } : {} }
+    })
+  });
+  if (!response.ok) {
+    const text2 = await response.text();
+    throw new Error(`Razorpay refund creation failed (${response.status}): ${text2.slice(0, 300)}`);
+  }
+  return razorpayRefundSchema.parse(await response.json());
+}
+
 // backend/security/memberAccount.ts
 import { createHash as createHash2, randomBytes as randomBytes2 } from "node:crypto";
 var MEMBER_SETUP_TOKEN_TTL_MS = 72 * 60 * 60 * 1e3;
@@ -2741,7 +3052,7 @@ function generateMemberPassword() {
 // backend/storage.ts
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // backend/_core/insforge.ts
 import { createClient, createAdminClient } from "@insforge/sdk";
@@ -2765,7 +3076,7 @@ function getForgeConfig() {
   }
   return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
 }
-var baseStorageDir = typeof import.meta.dirname === "string" ? import.meta.dirname : path.dirname(fileURLToPath(import.meta.url));
+var baseStorageDir = typeof import.meta.dirname === "string" ? import.meta.dirname : path.dirname(fileURLToPath2(import.meta.url));
 var localUploadsDir = path.resolve(baseStorageDir, "../.local-storage");
 function putLocalUpload(key, data) {
   fs.mkdirSync(localUploadsDir, { recursive: true });
@@ -2791,9 +3102,15 @@ function resolveInsForgeBucket(key) {
   if (lower.startsWith("receipt") || lower.includes("receipt")) return "receipts";
   return "member-documents";
 }
+function shouldUseInsForge() {
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return Boolean(ENV.insforgeApiKey && ENV.insforgeUrl);
+  }
+  return Boolean(ENV.insforgeApiKey || process.env.NODE_ENV === "production" || process.env.VERCEL);
+}
 async function storagePut(relKey, data, contentType = "application/octet-stream") {
   const key = appendHashSuffix(normalizeKey(relKey));
-  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+  if (shouldUseInsForge()) {
     try {
       const bucket = resolveInsForgeBucket(key);
       const blob = typeof data === "string" ? new Blob([data], { type: contentType }) : new Blob([data], { type: contentType });
@@ -2828,15 +3145,15 @@ async function storagePut(relKey, data, contentType = "application/octet-stream"
       }
     }
   }
-  if (process.env.NODE_ENV === "production" && !ENV.insforgeApiKey) {
-    throw new Error("Storage config missing: set INSFORGE_API_KEY or BUILT_IN_FORGE_API_KEY");
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+    throw new Error("Storage upload failed in production: InsForge/S3 upload did not succeed.");
   }
   putLocalUpload(key, data);
   return { key, url: `/manus-storage/${key}` };
 }
 async function storageGetSignedUrl(relKey) {
   const key = normalizeKey(relKey);
-  if (ENV.insforgeApiKey && ENV.insforgeUrl) {
+  if (shouldUseInsForge()) {
     try {
       const bucket = resolveInsForgeBucket(key);
       const { data, error } = await insforgeAdmin.storage.from(bucket).createSignedUrl(key, 3600);
@@ -2872,7 +3189,7 @@ function storageGetLocalUpload(relKey) {
   return { data: fs.readFileSync(target), mimeType };
 }
 function isLocalUploadMode() {
-  return (!ENV.forgeApiUrl || !ENV.forgeApiKey) && !ENV.insforgeApiKey;
+  return (!ENV.forgeApiUrl || !ENV.forgeApiKey) && !shouldUseInsForge();
 }
 function storageLocalUploadDataUrl(relKey) {
   const local = storageGetLocalUpload(relKey);
@@ -2883,25 +3200,25 @@ function storageLocalUploadDataUrl(relKey) {
 var MAX_ID_PROOF_BYTES = 5 * 1024 * 1024;
 var ID_PROOF_TYPES = ["aadhaar", "voter_id", "passport", "driving_licence", "other"];
 var ID_PROOF_MIME_TYPES = ["image/jpeg", "image/png", "application/pdf"];
-var membershipApplicationInput = z2.object({
-  fullName: z2.string().trim().min(2, "Please enter your full name.").max(255),
-  email: z2.string().trim().email("Please enter a valid email address.").max(320),
-  phone: z2.string().trim().min(8, "Please enter a valid phone number.").max(32).regex(/^[0-9+()\-\s]+$/, "Please use a valid phone number."),
-  city: z2.string().trim().min(2, "Please enter your city.").max(128),
-  state: z2.string().trim().min(2, "Please enter your state or region.").max(128),
-  district: z2.string().trim().min(2, "Please enter your district.").max(128),
-  membershipType: z2.enum(["annual", "lifetime"]),
-  panNumber: z2.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, "Please enter a valid PAN number."),
-  idProof: z2.object({
-    type: z2.enum(ID_PROOF_TYPES),
-    originalName: z2.string().trim().min(1, "Please select an ID-proof file.").max(255),
-    mimeType: z2.enum(ID_PROOF_MIME_TYPES),
-    dataBase64: z2.string().min(8, "Please upload your ID proof.")
+var membershipApplicationInput = z3.object({
+  fullName: z3.string().trim().min(2, "Please enter your full name.").max(255),
+  email: z3.string().trim().email("Please enter a valid email address.").max(320),
+  phone: z3.string().trim().min(8, "Please enter a valid phone number.").max(32).regex(/^[0-9+()\-\s]+$/, "Please use a valid phone number."),
+  city: z3.string().trim().min(2, "Please enter your city.").max(128),
+  state: z3.string().trim().min(2, "Please enter your state or region.").max(128),
+  district: z3.string().trim().min(2, "Please enter your district.").max(128),
+  membershipType: z3.enum(["annual", "lifetime"]),
+  panNumber: z3.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, "Please enter a valid PAN number."),
+  idProof: z3.object({
+    type: z3.enum(ID_PROOF_TYPES),
+    originalName: z3.string().trim().min(1, "Please select an ID-proof file.").max(255),
+    mimeType: z3.enum(ID_PROOF_MIME_TYPES),
+    dataBase64: z3.string().min(8, "Please upload your ID proof.")
   }),
-  message: z2.string().trim().max(1500).optional(),
-  privacyConsent: z2.literal(true, { error: "Please confirm that AASW may use these details to follow up on your application." }),
-  renewalIntent: z2.boolean().optional(),
-  website: z2.string().max(0).optional()
+  message: z3.string().trim().max(1500).optional(),
+  privacyConsent: z3.literal(true, { error: "Please confirm that AASW may use these details to follow up on your application." }),
+  renewalIntent: z3.boolean().optional(),
+  website: z3.string().max(0).optional()
 });
 function createApplicationRef() {
   return `AASW-MEM-${nanoid(12).toUpperCase()}`;
@@ -2922,9 +3239,206 @@ function memberAppBaseUrl(req) {
   if (host) return `${req.protocol === "http" ? "http" : "https"}://${host}`;
   return "http://localhost:3000";
 }
+function membershipFeeInRupees(membershipType) {
+  return membershipType === "lifetime" ? 1e4 : 1100;
+}
+function mapEligibilityError(error, renewalIntent) {
+  const reason = error instanceof Error ? error.message : "";
+  if (renewalIntent && reason === "Membership renewal identity did not match.") {
+    return new TRPCError3({ code: "CONFLICT", message: "Membership renewal identity did not match." });
+  }
+  if (renewalIntent && reason === "No existing membership found for this renewal email.") {
+    return new TRPCError3({ code: "NOT_FOUND", message: "No existing membership found for this renewal email." });
+  }
+  if (reason === "An active membership already exists for this email.") {
+    return new TRPCError3({ code: "CONFLICT", message: "An active membership already exists for this email." });
+  }
+  return new TRPCError3({ code: "CONFLICT", message: "We could not verify membership eligibility for this email. Please contact AASW Foundation for assistance." });
+}
 var membershipRouter = router({
+  /**
+   * Step 1 of live paid membership: validates details & eligibility, stores the
+   * unpaid application with status="submitted" (NO member account and NO
+   * Membership ID yet), and creates a Razorpay order for the exact plan fee.
+   */
+  startPaymentCheckout: publicProcedure.input(membershipApplicationInput).mutation(async ({ input }) => {
+    if (input.website) throw new TRPCError3({ code: "BAD_REQUEST", message: "Unable to submit this application." });
+    const config = getRazorpayConfig();
+    if (!config) {
+      throw new TRPCError3({ code: "PRECONDITION_FAILED", message: "Live payment setup is not complete yet." });
+    }
+    const panHash = hashSensitiveMatchValue(input.panNumber);
+    try {
+      await assertMembershipEligibility({ email: input.email, panHash, renewalIntent: input.renewalIntent });
+    } catch (error) {
+      throw mapEligibilityError(error, input.renewalIntent);
+    }
+    const applicationRef = createApplicationRef();
+    const proofBuffer = decodeIdProof(input.idProof.dataBase64);
+    let storedProof;
+    try {
+      storedProof = await storagePut(`membership-applications/${applicationRef}/id-proof.${proofExtension(input.idProof.mimeType)}`, proofBuffer, input.idProof.mimeType);
+    } catch (error) {
+      console.error("[Membership] ID-proof upload failed", { applicationRef, error });
+      throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR", message: "Your ID proof could not be securely uploaded. Please try again." });
+    }
+    await createMembershipApplication({
+      applicationRef,
+      fullName: input.fullName,
+      email: input.email,
+      phone: input.phone,
+      city: input.city,
+      state: input.state,
+      district: input.district,
+      membershipType: input.membershipType,
+      message: input.message || null,
+      panEncrypted: encryptSensitiveValue(input.panNumber),
+      panHash,
+      panLastFour: input.panNumber.slice(-4),
+      idProofType: input.idProof.type,
+      idProofStorageKey: storedProof.key,
+      idProofOriginalName: input.idProof.originalName,
+      idProofMimeType: input.idProof.mimeType,
+      status: "submitted",
+      notificationStatus: "pending"
+    });
+    const amountPaise = membershipFeeInRupees(input.membershipType) * 100;
+    const order = await createRazorpayOrder({ amount: amountPaise, receipt: applicationRef, kind: "membership" });
+    await createPaymentTransaction({
+      receipt: applicationRef,
+      kind: "membership",
+      amount: amountPaise,
+      currency: "INR",
+      supporterName: input.fullName,
+      supporterEmail: input.email.toLowerCase(),
+      supporterPhone: input.phone || null,
+      gateway: "razorpay",
+      gatewayOrderId: order.id,
+      status: "created"
+    });
+    return {
+      applicationRef,
+      keyId: config.keyId,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      receipt: applicationRef
+    };
+  }),
+  /**
+   * Step 2 of live paid membership: verifies Razorpay signature + captured
+   * payment on the server, and ONLY THEN activates the member account and
+   * issues the Membership ID.
+   */
+  confirmPaymentCheckout: publicProcedure.input(z3.object({
+    applicationRef: z3.string().trim().min(6).max(40),
+    razorpayOrderId: z3.string().min(1),
+    razorpayPaymentId: z3.string().min(1),
+    razorpaySignature: z3.string().min(1),
+    renewalIntent: z3.boolean().optional()
+  })).mutation(async ({ input, ctx }) => {
+    const config = getRazorpayConfig();
+    const transaction = await getPaymentTransactionByGatewayOrderId(input.razorpayOrderId);
+    if (!config || !transaction || transaction.receipt !== input.applicationRef || transaction.kind !== "membership") {
+      throw new TRPCError3({ code: "NOT_FOUND", message: "Membership payment order was not found." });
+    }
+    if (!verifyRazorpayCheckoutSignature(transaction.gatewayOrderId, input.razorpayPaymentId, input.razorpaySignature, config.keySecret)) {
+      throw new TRPCError3({ code: "BAD_REQUEST", message: "Payment verification failed." });
+    }
+    let payment;
+    try {
+      payment = await fetchRazorpayPayment(input.razorpayPaymentId);
+    } catch {
+      throw new TRPCError3({ code: "BAD_GATEWAY", message: "The payment could not be confirmed with Razorpay. Please contact AASW before retrying." });
+    }
+    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency) {
+      throw new TRPCError3({ code: "PRECONDITION_FAILED", message: "Razorpay payment details did not match this membership order." });
+    }
+    if (payment.status === "authorized") {
+      try {
+        payment = await captureRazorpayPayment({ paymentId: input.razorpayPaymentId, amount: transaction.amount, currency: transaction.currency });
+      } catch {
+        try {
+          payment = await fetchRazorpayPayment(input.razorpayPaymentId);
+        } catch {
+        }
+      }
+    }
+    if (payment.status !== "captured") {
+      throw new TRPCError3({ code: "PRECONDITION_FAILED", message: "Razorpay has not confirmed a captured payment for this membership. No membership has been activated yet." });
+    }
+    await markPaymentTransactionStatus(transaction.gatewayOrderId, "verified", input.razorpayPaymentId);
+    const receiptDelivery = await dispatchVerifiedPaymentReceipt({ ...transaction, status: "verified", gatewayPaymentId: input.razorpayPaymentId });
+    if (receiptDelivery === "failed") console.error("[Membership] Verified payment receipt could not be delivered.", { receipt: transaction.receipt });
+    const application = await getMembershipApplicationByRef(input.applicationRef);
+    if (!application) throw new TRPCError3({ code: "NOT_FOUND", message: "Membership application record was not found." });
+    const setup = createMemberSetupToken();
+    const loginPassword = generateMemberPassword();
+    const loginPasswordHash = await bcrypt.hash(loginPassword, 12);
+    let activation;
+    try {
+      activation = await activateMembershipFromExistingApplication({
+        applicationRef: input.applicationRef,
+        passwordHash: loginPasswordHash,
+        setupTokenHash: setup.tokenHash,
+        setupTokenExpiresAt: setup.expiresAt,
+        renewalIntent: input.renewalIntent
+      });
+    } catch (error) {
+      console.error("[Membership] Paid member activation failed", { applicationRef: input.applicationRef, error });
+      throw mapEligibilityError(error, input.renewalIntent);
+    }
+    const notification = await dispatchMembershipApplicationNotification({
+      applicationRef: application.applicationRef,
+      fullName: application.fullName,
+      email: application.email,
+      phone: application.phone,
+      district: application.district,
+      state: application.state,
+      membershipType: application.membershipType
+    });
+    if (notification === "sent") await markMembershipApplicationNotification(application.applicationRef, "sent");
+    else await markMembershipApplicationNotification(application.applicationRef, "failed", notification.error);
+    if (activation.isRenewal) {
+      return {
+        applicationRef: application.applicationRef,
+        membershipNo: activation.membershipNo,
+        status: "approved",
+        renewal: true,
+        paymentId: input.razorpayPaymentId,
+        receipt: transaction.receipt,
+        notificationStatus: notification === "sent" ? "sent" : "failed",
+        activationEmailStatus: "not_required"
+      };
+    }
+    const loginUrl = `${memberAppBaseUrl(ctx.req)}/member/login`;
+    const certificateEmailToken = createMemberSetupToken();
+    await createMemberCertificateEmailToken(activation.memberId, certificateEmailToken.tokenHash, certificateEmailToken.expiresAt);
+    const certificateUrl = `${memberAppBaseUrl(ctx.req)}/member/email-certificate?token=${encodeURIComponent(certificateEmailToken.token)}`;
+    const activationEmail = await dispatchMemberActivationEmail({
+      fullName: application.fullName,
+      email: application.email,
+      membershipNo: activation.membershipNo,
+      loginPassword,
+      loginUrl,
+      certificateUrl
+    });
+    return {
+      applicationRef: application.applicationRef,
+      membershipNo: activation.membershipNo,
+      status: "approved",
+      renewal: false,
+      paymentId: input.razorpayPaymentId,
+      receipt: transaction.receipt,
+      notificationStatus: notification === "sent" ? "sent" : "failed",
+      activationEmailStatus: activationEmail === "sent" || activationEmail === "mocked" ? activationEmail : "failed"
+    };
+  }),
   submit: publicProcedure.input(membershipApplicationInput).mutation(async ({ input, ctx }) => {
     if (input.website) throw new TRPCError3({ code: "BAD_REQUEST", message: "Unable to submit this application." });
+    if (!process.env.VITEST && getRazorpayConfig()) {
+      throw new TRPCError3({ code: "PRECONDITION_FAILED", message: "Membership activation requires completing Razorpay payment first." });
+    }
     const applicationRef = createApplicationRef();
     const proofBuffer = decodeIdProof(input.idProof.dataBase64);
     let storedProof;
@@ -2970,7 +3484,7 @@ var membershipRouter = router({
       const reason = error instanceof Error ? error.message : "";
       if (input.renewalIntent && reason === "Membership renewal identity did not match.") throw new TRPCError3({ code: "CONFLICT", message: "Membership renewal identity did not match." });
       if (input.renewalIntent && reason === "No existing membership found for this renewal email.") throw new TRPCError3({ code: "NOT_FOUND", message: "No existing membership found for this renewal email." });
-      if (input.renewalIntent && reason === "An active membership already exists for this email.") throw new TRPCError3({ code: "CONFLICT", message: "An active membership already exists for this email." });
+      if (reason === "An active membership already exists for this email.") throw new TRPCError3({ code: "CONFLICT", message: "An active membership already exists for this email." });
       throw new TRPCError3({ code: "CONFLICT", message: "We could not activate this membership account. Please contact AASW Foundation for assistance." });
     }
     const notification = await dispatchMembershipApplicationNotification({ applicationRef, fullName: input.fullName, email: input.email, phone: input.phone, district: input.district, state: input.state, membershipType: input.membershipType });
@@ -2991,18 +3505,18 @@ var membershipRouter = router({
 // backend/routers/inquiries.ts
 import { TRPCError as TRPCError4 } from "@trpc/server";
 import { nanoid as nanoid2 } from "nanoid";
-import { z as z3 } from "zod";
+import { z as z4 } from "zod";
 
 // backend/email/inquiryNotification.ts
-import nodemailer3 from "nodemailer";
+import nodemailer4 from "nodemailer";
 var INQUIRY_TOPICS = ["programmes", "membership", "donation", "partnership", "media", "other"];
-function escapeHtml3(value) {
+function escapeHtml4(value) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 }
 function topicLabel(topic) {
   return { programmes: "Programmes", membership: "Membership", donation: "Donation", partnership: "Partnership", media: "Media or information", other: "Other" }[topic];
 }
-function smtpConfig3() {
+function smtpConfig4() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT);
   const user = process.env.SMTP_USER;
@@ -3010,9 +3524,9 @@ function smtpConfig3() {
   if (!host || !port || !user || !pass) throw new Error("Foundation notification sender is not configured.");
   return { host, port, user, pass };
 }
-async function deliverWithFoundationGmail3(mail) {
-  const smtp = smtpConfig3();
-  const transport = nodemailer3.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
+async function deliverWithFoundationGmail4(mail) {
+  const smtp = smtpConfig4();
+  const transport = nodemailer4.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
   return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
 }
 function createInquiryNotification(input) {
@@ -3027,32 +3541,88 @@ Topic: ${label}
 
 Message:
 ${input.message}`;
-  const safe = { inquiryRef: escapeHtml3(input.inquiryRef), fullName: escapeHtml3(input.fullName), email: escapeHtml3(input.email), phone: escapeHtml3(input.phone), topic: escapeHtml3(label), message: escapeHtml3(input.message).replace(/\n/g, "<br/>") };
+  const safe = { inquiryRef: escapeHtml4(input.inquiryRef), fullName: escapeHtml4(input.fullName), email: escapeHtml4(input.email), phone: escapeHtml4(input.phone), topic: escapeHtml4(label), message: escapeHtml4(input.message).replace(/\n/g, "<br/>") };
   return {
     subject: `New website inquiry \xB7 ${input.inquiryRef}`,
     text: body,
     html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Website inquiry</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:30px;font-weight:400">A new message has arrived.</h1><table role="presentation" style="width:100%;margin-top:24px;border-collapse:collapse"><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Reference</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right;font-weight:700">${safe.inquiryRef}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">From</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.fullName}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Contact</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.email}<br/>${safe.phone}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Topic</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.topic}</td></tr></table><div style="margin-top:22px;padding:16px;background:#f7f3ea"><p style="margin:0 0 8px;color:#796966;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Message</p><p style="margin:0;color:#291d1d;font-size:14px;line-height:1.7">${safe.message}</p></div></section></main></body></html>`
   };
 }
-async function dispatchInquiryNotification(input, dependencies = { deliver: deliverWithFoundationGmail3 }) {
+async function dispatchInquiryNotification(input, dependencies = { deliver: deliverWithFoundationGmail4 }) {
   try {
-    const smtp = smtpConfig3();
+    const smtp = smtpConfig4();
     await dependencies.deliver({ to: smtp.user, ...createInquiryNotification(input) });
+    if (dependencies.deliver === deliverWithFoundationGmail4) {
+      const safeName = escapeHtml4(input.fullName);
+      const safeRef = escapeHtml4(input.inquiryRef);
+      const safeTopic = escapeHtml4(topicLabel(input.topic));
+      await deliverWithFoundationGmail4({
+        to: input.email,
+        subject: `We received your message \xB7 ${input.inquiryRef}`,
+        text: `Dear ${input.fullName},
+
+Thank you for contacting AASW Foundation. We have received your inquiry regarding ${topicLabel(input.topic)}.
+
+Inquiry reference: ${input.inquiryRef}
+
+Our team will review your message and respond soon.
+
+AASW Foundation
+Rura, Kanpur Dehat, Uttar Pradesh 209303`,
+        html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Inquiry received</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:28px;font-weight:400">Thank you for writing to us.</h1><p style="margin:18px 0 0;color:#584744;font-size:15px;line-height:1.7">Dear ${safeName}, we have received your message regarding <strong>${safeTopic}</strong>. Our team will review it and reply shortly.</p><p style="margin:18px 0 0;padding:14px 16px;background:#fffdf7;border-left:4px solid #d4820a;font-size:14px"><strong>Reference:</strong> ${safeRef}</p><p style="margin:20px 0 0;color:#796966;font-size:12px">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303</p></section></main></body></html>`
+      }).catch((err) => console.warn("[Inquiry] User acknowledgement email could not be sent:", err));
+    }
     return "sent";
   } catch (error) {
     return { status: "failed", error: error instanceof Error ? error.message : "Unknown notification error." };
   }
 }
 
+// backend/email/newsletterWelcome.ts
+import nodemailer5 from "nodemailer";
+function smtpConfig5() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_APP_PASSWORD;
+  if (!host || !port || !user || !pass) return null;
+  return { host, port, user, pass };
+}
+async function dispatchNewsletterWelcomeEmail(email) {
+  const smtp = smtpConfig5();
+  if (!smtp) return "skipped";
+  try {
+    const transport = nodemailer5.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465,
+      requireTLS: smtp.port !== 465,
+      auth: { user: smtp.user, pass: smtp.pass }
+    });
+    await transport.sendMail({
+      from: { name: "AASW Foundation", address: smtp.user },
+      replyTo: smtp.user,
+      to: email,
+      subject: "Welcome to AASW Foundation Updates",
+      text: "Thank you for subscribing to AASW Foundation updates.\n\nWe will share field stories, programme updates, and community milestones directly to your inbox.\n\nAASW Foundation\nRura, Kanpur Dehat, Uttar Pradesh 209303",
+      html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Newsletter</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:28px;font-weight:400">You\u2019re subscribed.</h1><p style="margin:18px 0 0;color:#584744;font-size:15px;line-height:1.7">Thank you for subscribing to AASW Foundation updates. We will share field updates, women-led enterprise stories, and community milestones with you.</p><p style="margin:22px 0 0;color:#796966;font-size:12px">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303</p></section></main></body></html>`
+    });
+    return "sent";
+  } catch (error) {
+    console.warn("[Newsletter] Welcome email failed:", error);
+    return "failed";
+  }
+}
+
 // backend/routers/inquiries.ts
-var contactInquiryInput = z3.object({
-  fullName: z3.string().trim().min(2, "Please enter your full name.").max(255),
-  email: z3.string().trim().email("Please enter a valid email address.").max(320),
-  phone: z3.string().trim().min(8, "Please enter a valid phone number.").max(32).regex(/^[0-9+()\-\s]+$/, "Please use a valid phone number."),
-  topic: z3.enum(INQUIRY_TOPICS),
-  message: z3.string().trim().min(15, "Please share a little more detail so the Foundation can help.").max(2e3),
-  privacyConsent: z3.literal(true, { error: "Please confirm that AASW may use these details to respond to your inquiry." }),
-  website: z3.string().max(0).optional()
+var contactInquiryInput = z4.object({
+  fullName: z4.string().trim().min(2, "Please enter your full name.").max(255),
+  email: z4.string().trim().email("Please enter a valid email address.").max(320),
+  phone: z4.string().trim().min(8, "Please enter a valid phone number.").max(32).regex(/^[0-9+()\-\s]+$/, "Please use a valid phone number."),
+  topic: z4.enum(INQUIRY_TOPICS),
+  message: z4.string().trim().min(15, "Please share a little more detail so the Foundation can help.").max(2e3),
+  privacyConsent: z4.literal(true, { error: "Please confirm that AASW may use these details to respond to your inquiry." }),
+  website: z4.string().max(0).optional()
 });
 function createInquiryRef() {
   return `AASW-INQ-${nanoid2(12).toUpperCase()}`;
@@ -3068,16 +3638,20 @@ var inquiryRouter = router({
     return { inquiryRef, status: "submitted", notificationStatus: notification === "sent" ? "sent" : "failed" };
   })
 });
-var newsletterSubscribeInput = z3.object({
-  email: z3.string().trim().email("Please enter a valid email address.").max(320),
-  source: z3.enum(["footer", "updates_page"]).default("footer"),
-  website: z3.string().max(0).optional()
+var newsletterSubscribeInput = z4.object({
+  email: z4.string().trim().email("Please enter a valid email address.").max(320),
+  source: z4.enum(["footer", "updates_page"]).default("footer"),
+  website: z4.string().max(0).optional()
 });
 var newsletterRouter = router({
   subscribe: publicProcedure.input(newsletterSubscribeInput).mutation(async ({ input }) => {
     if (input.website) throw new TRPCError4({ code: "BAD_REQUEST", message: "Unable to process this subscription." });
     const email = input.email.toLowerCase();
     const result = await subscribeNewsletterEmail({ email, source: input.source });
+    if (result.created) {
+      await dispatchNewsletterWelcomeEmail(email).catch(() => {
+      });
+    }
     return { email, status: "subscribed", alreadySubscribed: !result.created };
   })
 });
@@ -3085,14 +3659,14 @@ var newsletterRouter = router({
 // backend/routers/donations.ts
 import { TRPCError as TRPCError5 } from "@trpc/server";
 import { nanoid as nanoid3 } from "nanoid";
-import { z as z4 } from "zod";
+import { z as z5 } from "zod";
 
 // backend/email/donationNotification.ts
-import nodemailer4 from "nodemailer";
-function escapeHtml4(value) {
-  return value.replace(/[&<'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
+import nodemailer6 from "nodemailer";
+function escapeHtml5(value) {
+  return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 }
-function smtpConfig4() {
+function smtpConfig6() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT);
   const user = process.env.SMTP_USER;
@@ -3100,9 +3674,9 @@ function smtpConfig4() {
   if (!host || !port || !user || !pass) throw new Error("Foundation notification sender is not configured.");
   return { host, port, user, pass };
 }
-async function deliverWithFoundationGmail4(mail) {
-  const smtp = smtpConfig4();
-  const transport = nodemailer4.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
+async function deliverWithFoundationGmail5(mail) {
+  const smtp = smtpConfig6();
+  const transport = nodemailer6.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
   return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
 }
 function createDonationNotification(input) {
@@ -3117,12 +3691,12 @@ Amount selected: ${formattedAmount}
 Location: ${input.city}, ${input.state}
 
 PAN, date of birth and address are not included in this email. Review sensitive records only through the protected Foundation workspace.`;
-  const safe = { donationRef: escapeHtml4(input.donationRef), fullName: escapeHtml4(input.fullName), email: escapeHtml4(input.email), phone: escapeHtml4(input.phone), amount: escapeHtml4(formattedAmount), location: escapeHtml4(`${input.city}, ${input.state}`) };
+  const safe = { donationRef: escapeHtml5(input.donationRef), fullName: escapeHtml5(input.fullName), email: escapeHtml5(input.email), phone: escapeHtml5(input.phone), amount: escapeHtml5(formattedAmount), location: escapeHtml5(`${input.city}, ${input.state}`) };
   return { subject: `New donation details \xB7 ${input.donationRef}`, text: text2, html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #d4820a;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#d4820a;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Donation detail alert</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:30px;font-weight:400">A new donation path has started.</h1><table role="presentation" style="width:100%;margin-top:24px;border-collapse:collapse"><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Reference</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right;font-weight:700">${safe.donationRef}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Donor</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.fullName}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Contact</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.email}<br/>${safe.phone}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Amount selected</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.amount}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966">Location</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;text-align:right">${safe.location}</td></tr></table><p style="margin:22px 0 0;color:#796966;font-size:12px;line-height:1.6">For privacy, PAN, date of birth and address are not included in this email. Review sensitive information only in the protected Foundation workspace.</p></section></main></body></html>` };
 }
-async function dispatchDonationNotification(input, dependencies = { deliver: deliverWithFoundationGmail4 }) {
+async function dispatchDonationNotification(input, dependencies = { deliver: deliverWithFoundationGmail5 }) {
   try {
-    const smtp = smtpConfig4();
+    const smtp = smtpConfig6();
     await dependencies.deliver({ to: smtp.user, ...createDonationNotification(input) });
     return "sent";
   } catch (error) {
@@ -3131,19 +3705,19 @@ async function dispatchDonationNotification(input, dependencies = { deliver: del
 }
 
 // backend/routers/donations.ts
-var donationDetailsInput = z4.object({
-  fullName: z4.string().trim().min(2).max(255),
-  email: z4.string().trim().email().max(320),
-  phone: z4.string().trim().min(8).max(32).regex(/^[0-9+()\-\s]+$/),
-  dob: z4.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  panNumber: z4.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/),
-  state: z4.string().trim().min(2).max(128),
-  city: z4.string().trim().min(2).max(128),
-  address: z4.string().trim().min(8).max(1500),
-  pincode: z4.string().regex(/^\d{6}$/),
-  amount: z4.number().int().min(10).max(1e7),
-  privacyConsent: z4.literal(true),
-  website: z4.string().max(0).optional()
+var donationDetailsInput = z5.object({
+  fullName: z5.string().trim().min(2).max(255),
+  email: z5.string().trim().email().max(320),
+  phone: z5.string().trim().min(8).max(32).regex(/^[0-9+()\-\s]+$/),
+  dob: z5.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  panNumber: z5.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/),
+  state: z5.string().trim().min(2).max(128),
+  city: z5.string().trim().min(2).max(128),
+  address: z5.string().trim().min(8).max(1500),
+  pincode: z5.string().regex(/^\d{6}$/),
+  amount: z5.number().int().min(10).max(1e7),
+  privacyConsent: z5.literal(true),
+  website: z5.string().max(0).optional()
 });
 function createDonationRef() {
   return `AASW-DON-${nanoid3(12).toUpperCase()}`;
@@ -3164,14 +3738,14 @@ var donationRouter = router({
 // backend/routers/volunteer.ts
 import { TRPCError as TRPCError6 } from "@trpc/server";
 import { nanoid as nanoid4 } from "nanoid";
-import { z as z5 } from "zod";
+import { z as z6 } from "zod";
 
 // backend/email/volunteerNotification.ts
-import nodemailer5 from "nodemailer";
-function escapeHtml5(value) {
+import nodemailer7 from "nodemailer";
+function escapeHtml6(value) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 }
-function smtpConfig5() {
+function smtpConfig7() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT);
   const user = process.env.SMTP_USER;
@@ -3179,9 +3753,9 @@ function smtpConfig5() {
   if (!host || !port || !user || !pass) throw new Error("Volunteer notification sender is not configured.");
   return { host, port, user, pass };
 }
-async function deliverWithFoundationGmail5(mail) {
-  const smtp = smtpConfig5();
-  const transport = nodemailer5.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
+async function deliverWithFoundationGmail6(mail) {
+  const smtp = smtpConfig7();
+  const transport = nodemailer7.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
   return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
 }
 function createVolunteerApplicationNotification(input) {
@@ -3197,7 +3771,7 @@ Availability: ${input.availability}
 Interests: ${input.interests}
 
 Review and decide through the protected Foundation workspace.`;
-  const safe = { applicationRef: escapeHtml5(input.applicationRef), fullName: escapeHtml5(input.fullName), email: escapeHtml5(input.email), phone: escapeHtml5(input.phone), city: escapeHtml5(input.city), state: escapeHtml5(input.state), skills: escapeHtml5(input.skills), availability: escapeHtml5(input.availability), interests: escapeHtml5(input.interests) };
+  const safe = { applicationRef: escapeHtml6(input.applicationRef), fullName: escapeHtml6(input.fullName), email: escapeHtml6(input.email), phone: escapeHtml6(input.phone), city: escapeHtml6(input.city), state: escapeHtml6(input.state), skills: escapeHtml6(input.skills), availability: escapeHtml6(input.availability), interests: escapeHtml6(input.interests) };
   return {
     subject: `New volunteer application \xB7 ${input.applicationRef}`,
     text: body,
@@ -3207,7 +3781,7 @@ Review and decide through the protected Foundation workspace.`;
 function createVolunteerDecisionMail(input) {
   const approved = input.status === "approved";
   const notes = input.reviewNotes?.trim();
-  const safe = { fullName: escapeHtml5(input.fullName), applicationRef: escapeHtml5(input.applicationRef), notes: notes ? escapeHtml5(notes) : "" };
+  const safe = { fullName: escapeHtml6(input.fullName), applicationRef: escapeHtml6(input.applicationRef), notes: notes ? escapeHtml6(notes) : "" };
   return {
     to: input.email,
     subject: approved ? `AASW Foundation volunteer application approved \xB7 ${input.applicationRef}` : `AASW Foundation volunteer application update \xB7 ${input.applicationRef}`,
@@ -3231,16 +3805,35 @@ AASW Foundation`,
     html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Volunteer application</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:30px;font-weight:400">${approved ? "Welcome to the volunteer collective." : "An update on your application."}</h1><p style="margin:22px 0 0;color:#5c4b47;font-size:16px;line-height:1.7">Dear ${safe.fullName}, ${approved ? "your volunteer application has been approved. Our team will reach out with your first volunteering opportunity and any onboarding steps." : "after review, we are unable to proceed with your volunteer application at this time. You are welcome to apply again in the future."}</p><p style="margin:18px 0 0;color:#796966;font-size:12px">Reference: ${safe.applicationRef}</p>${safe.notes ? `<p style="margin:22px 0 0;padding:16px;border:1px solid #d8cfc4;background:#fffdf7;color:#5c4b47;font-size:14px;line-height:1.65"><strong>Notes from the Foundation:</strong><br/>${safe.notes}</p>` : ""}<p style="margin:22px 0 0;color:#5c4b47;font-size:14px;line-height:1.65">For any question, write to <a href="mailto:aaswfoundation06@gmail.com" style="color:#2f6b52">aaswfoundation06@gmail.com</a>.</p></section></main></body></html>`
   };
 }
-async function dispatchVolunteerApplicationNotification(input, dependencies = { deliver: deliverWithFoundationGmail5 }) {
+async function dispatchVolunteerApplicationNotification(input, dependencies = { deliver: deliverWithFoundationGmail6 }) {
   try {
-    const smtp = smtpConfig5();
+    const smtp = smtpConfig7();
     await dependencies.deliver({ to: smtp.user, ...createVolunteerApplicationNotification(input) });
+    if (dependencies.deliver === deliverWithFoundationGmail6) {
+      const safeName = escapeHtml6(input.fullName);
+      const safeRef = escapeHtml6(input.applicationRef);
+      await deliverWithFoundationGmail6({
+        to: input.email,
+        subject: `Volunteer application received \xB7 ${input.applicationRef}`,
+        text: `Dear ${input.fullName},
+
+Thank you for applying to volunteer with AASW Foundation.
+
+Application reference: ${input.applicationRef}
+
+Our team will review your application and send an update by email.
+
+AASW Foundation
+Rura, Kanpur Dehat, Uttar Pradesh 209303`,
+        html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:620px;margin:0 auto;padding:30px 20px"><section style="border-top:6px solid #2f6b52;background:#fffaf0;padding:30px"><p style="margin:0 0 14px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase">AASW Foundation \xB7 Volunteer application</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:28px;font-weight:400">Application received.</h1><p style="margin:18px 0 0;color:#584744;font-size:15px;line-height:1.7">Dear ${safeName}, thank you for offering your time to AASW Foundation. Our team will review your application and update you by email.</p><p style="margin:18px 0 0;padding:14px 16px;background:#fffdf7;border-left:4px solid #d4820a;font-size:14px"><strong>Application reference:</strong> ${safeRef}</p><p style="margin:20px 0 0;color:#796966;font-size:12px">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303</p></section></main></body></html>`
+      }).catch((err) => console.warn("[Volunteer] Applicant acknowledgement email could not be sent:", err));
+    }
     return "sent";
   } catch (error) {
     return { status: "failed", error: error instanceof Error ? error.message : "Unknown volunteer notification error." };
   }
 }
-async function dispatchVolunteerDecisionEmail(input, dependencies = { deliver: deliverWithFoundationGmail5 }) {
+async function dispatchVolunteerDecisionEmail(input, dependencies = { deliver: deliverWithFoundationGmail6 }) {
   try {
     await dependencies.deliver(createVolunteerDecisionMail(input));
     return "sent";
@@ -3250,18 +3843,18 @@ async function dispatchVolunteerDecisionEmail(input, dependencies = { deliver: d
 }
 
 // backend/routers/volunteer.ts
-var volunteerApplicationInput = z5.object({
-  fullName: z5.string().trim().min(2, "Please enter your full name.").max(255),
-  email: z5.string().trim().toLowerCase().email("Please enter a valid email address.").max(320),
-  phone: z5.string().trim().min(8, "Please enter a valid phone number.").max(32).regex(/^[0-9+()\-\s]+$/, "Please use a valid phone number."),
-  city: z5.string().trim().min(2, "Please enter your city.").max(128),
-  state: z5.string().trim().min(2, "Please enter your state or region.").max(128),
-  skills: z5.string().trim().min(3, "Please share the skills you can contribute.").max(2e3),
-  availability: z5.string().trim().min(3, "Please share when you are available.").max(255),
-  interests: z5.string().trim().min(3, "Please share where you would like to help.").max(2e3),
-  message: z5.string().trim().max(1500).optional(),
-  privacyConsent: z5.literal(true, { error: "Please confirm that AASW may use these details to follow up on your application." }),
-  website: z5.string().max(0).optional()
+var volunteerApplicationInput = z6.object({
+  fullName: z6.string().trim().min(2, "Please enter your full name.").max(255),
+  email: z6.string().trim().toLowerCase().email("Please enter a valid email address.").max(320),
+  phone: z6.string().trim().min(8, "Please enter a valid phone number.").max(32).regex(/^[0-9+()\-\s]+$/, "Please use a valid phone number."),
+  city: z6.string().trim().min(2, "Please enter your city.").max(128),
+  state: z6.string().trim().min(2, "Please enter your state or region.").max(128),
+  skills: z6.string().trim().min(3, "Please share the skills you can contribute.").max(2e3),
+  availability: z6.string().trim().min(3, "Please share when you are available.").max(255),
+  interests: z6.string().trim().min(3, "Please share where you would like to help.").max(2e3),
+  message: z6.string().trim().max(1500).optional(),
+  privacyConsent: z6.literal(true, { error: "Please confirm that AASW may use these details to follow up on your application." }),
+  website: z6.string().max(0).optional()
 });
 function createVolunteerApplicationRef() {
   return `AASW-VOL-${nanoid4(12).toUpperCase()}`;
@@ -3296,7 +3889,7 @@ var volunteerRouter = router({
     return { applicationRef, status: "submitted", notificationStatus: notification === "sent" ? "sent" : "failed" };
   }),
   /** Public status lookup: requires both the unguessable reference and the applicant email. */
-  myStatus: publicProcedure.input(z5.object({ applicationRef: z5.string().trim().min(6).max(40), email: z5.string().trim().toLowerCase().email().max(320) })).query(async ({ input }) => {
+  myStatus: publicProcedure.input(z6.object({ applicationRef: z6.string().trim().min(6).max(40), email: z6.string().trim().toLowerCase().email().max(320) })).query(async ({ input }) => {
     const application = await getVolunteerApplicationByRef(input.applicationRef);
     if (!application || application.email !== input.email) return { found: false, status: null };
     return { found: true, status: application.status };
@@ -3306,17 +3899,17 @@ var volunteerRouter = router({
 // backend/routers/management.ts
 import { TRPCError as TRPCError7 } from "@trpc/server";
 import { nanoid as nanoid5 } from "nanoid";
-import { z as z6 } from "zod";
+import { z as z7 } from "zod";
 
 // backend/email/memberPayoutNotification.ts
-import nodemailer6 from "nodemailer";
-function escapeHtml6(value) {
+import nodemailer8 from "nodemailer";
+function escapeHtml7(value) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 }
 function formatRupees(amountInPaise) {
   return `\u20B9${(amountInPaise / 100).toLocaleString("en-IN")}`;
 }
-function smtpConfig6() {
+function smtpConfig8() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT);
   const user = process.env.SMTP_USER;
@@ -3324,9 +3917,9 @@ function smtpConfig6() {
   if (!host || !port || !user || !pass) throw new Error("Foundation member email sender is not configured.");
   return { host, port, user, pass };
 }
-async function deliverWithFoundationGmail6(mail) {
-  const smtp = smtpConfig6();
-  const transport = nodemailer6.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
+async function deliverWithFoundationGmail7(mail) {
+  const smtp = smtpConfig8();
+  const transport = nodemailer8.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
   return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
 }
 function emailCopy(status, input) {
@@ -3358,13 +3951,13 @@ function emailCopy(status, input) {
 function createMemberPayoutStatusEmail(input) {
   const copy = emailCopy(input.status, input);
   const safe = {
-    fullName: escapeHtml6(input.fullName),
-    membershipNo: escapeHtml6(input.membershipNo),
-    dashboardUrl: escapeHtml6(input.dashboardUrl),
-    heading: escapeHtml6(copy.heading),
-    intro: escapeHtml6(copy.intro),
-    footer: escapeHtml6(copy.footer),
-    rows: copy.rows.map(([label, value]) => [escapeHtml6(label), escapeHtml6(value)])
+    fullName: escapeHtml7(input.fullName),
+    membershipNo: escapeHtml7(input.membershipNo),
+    dashboardUrl: escapeHtml7(input.dashboardUrl),
+    heading: escapeHtml7(copy.heading),
+    intro: escapeHtml7(copy.intro),
+    footer: escapeHtml7(copy.footer),
+    rows: copy.rows.map(([label, value]) => [escapeHtml7(label), escapeHtml7(value)])
   };
   const textBody = `Dear ${input.fullName},
 
@@ -3381,7 +3974,7 @@ Do not reply to this email.`;
   const htmlBody = `<!doctype html><html lang="en"><body style="margin:0;background:#f6f0e6;color:#291d1d;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f0e6"><tr><td align="center" style="padding:28px 14px"><table role="presentation" width="620" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;background:#fffdf7;border:1px solid #e5ddd4"><tr><td style="padding:22px 30px;background:#174c3c"><p style="margin:0;color:#eac06e;font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase">AASW Foundation</p><p style="margin:4px 0 0;color:#ffffff;font-size:14px;font-weight:700;letter-spacing:.4px">Programme payout update</p></td></tr><tr><td style="padding:34px 30px 30px"><h1 style="margin:0 0 16px;color:#291d1d;font-family:Georgia,serif;font-size:32px;font-weight:400;line-height:1.15">${safe.heading}</h1><p style="margin:0 0 22px;color:#584744;font-size:15px;line-height:1.7">${safe.intro}</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffaf0;border-left:4px solid #d4820a">${safe.rows.map(([label, value]) => `<tr><td style="padding:13px 18px;border-bottom:1px solid #eee3d3"><p style="margin:0;color:#796966;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase">${label}</p><p style="margin:5px 0 0;color:#291d1d;font-size:17px;font-weight:700">${value}</p></td></tr>`).join("")}</table><p style="margin:22px 0 0;color:#796966;font-size:12px;line-height:1.65">${safe.footer}</p><table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:20px"><tr><td><a href="${safe.dashboardUrl}" style="display:inline-block;padding:14px 18px;background:#174c3c;color:#fffdf7;font-size:13px;font-weight:700;text-decoration:none">Open Member Portal</a></td></tr></table></td></tr><tr><td style="padding:22px 30px;background:#f0e7d8;border-top:1px solid #e2d7c8"><p style="margin:0;color:#5b4c47;font-size:11px;line-height:1.6">AASW Foundation \xB7 Rura, Kanpur Dehat, Uttar Pradesh 209303</p><p style="margin:10px 0 0;color:#796966;font-size:10px">This is an automated programme update; please do not reply.</p></td></tr></table></td></tr></table></body></html>`;
   return { subject: copy.subject, text: textBody, html: htmlBody };
 }
-async function dispatchMemberPayoutStatusEmail(input, dependencies = { deliver: deliverWithFoundationGmail6 }) {
+async function dispatchMemberPayoutStatusEmail(input, dependencies = { deliver: deliverWithFoundationGmail7 }) {
   const message = createMemberPayoutStatusEmail(input);
   try {
     await dependencies.deliver({ to: input.email, ...message });
@@ -3392,14 +3985,14 @@ async function dispatchMemberPayoutStatusEmail(input, dependencies = { deliver: 
 }
 
 // backend/routers/management.ts
-var limitInput = z6.object({ limit: z6.number().int().min(1).max(100).default(50) });
-var membershipStatus = z6.enum(["submitted", "reviewing", "approved", "declined"]);
-var inquiryStatus = z6.enum(["submitted", "reviewing", "responded", "closed"]);
-var donationStatus = z6.enum(["details_submitted", "checkout_created", "verified", "captured", "failed", "closed"]);
-var mediaStatus = z6.enum(["draft", "published", "archived"]);
-var serviceRequestStatus = z6.enum(["submitted", "reviewing", "accepted", "not_available", "completed", "closed"]);
-var supportMessageStatus = z6.enum(["submitted", "reviewing", "responded", "closed"]);
-var volunteerStatus = z6.enum(["submitted", "reviewing", "approved", "rejected", "inactive"]);
+var limitInput = z7.object({ limit: z7.number().int().min(1).max(100).default(50) });
+var membershipStatus = z7.enum(["submitted", "reviewing", "approved", "declined"]);
+var inquiryStatus = z7.enum(["submitted", "reviewing", "responded", "closed"]);
+var donationStatus = z7.enum(["details_submitted", "checkout_created", "verified", "captured", "failed", "closed"]);
+var mediaStatus = z7.enum(["draft", "published", "archived"]);
+var serviceRequestStatus = z7.enum(["submitted", "reviewing", "accepted", "not_available", "completed", "closed"]);
+var supportMessageStatus = z7.enum(["submitted", "reviewing", "responded", "closed"]);
+var volunteerStatus = z7.enum(["submitted", "reviewing", "approved", "rejected", "inactive"]);
 var allowedImageTypes = ["image/jpeg", "image/png", "image/webp"];
 var MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 function imageBuffer(dataBase64, mimeType) {
@@ -3434,18 +4027,18 @@ var managementRouter = router({
   summary: adminProcedure.query(() => getFoundationManagementSummary()),
   alerts: router({
     list: adminProcedure.input(limitInput).query(({ input }) => listFoundationAdminAlerts(input.limit)),
-    markRead: adminProcedure.input(z6.object({ alertId: z6.number().int().positive() })).mutation(async ({ input }) => {
+    markRead: adminProcedure.input(z7.object({ alertId: z7.number().int().positive() })).mutation(async ({ input }) => {
       await markFoundationAdminAlertRead(input.alertId);
       return { success: true };
     })
   }),
   memberships: router({
     list: adminProcedure.input(limitInput).query(({ input }) => listMembershipApplications(input.limit)),
-    updateStatus: adminProcedure.input(z6.object({ applicationRef: z6.string().min(1), status: membershipStatus })).mutation(async ({ input }) => {
+    updateStatus: adminProcedure.input(z7.object({ applicationRef: z7.string().min(1), status: membershipStatus })).mutation(async ({ input }) => {
       await updateMembershipApplicationStatus(input.applicationRef, input.status);
       return { status: input.status };
     }),
-    proofUrl: adminProcedure.input(z6.object({ applicationRef: z6.string().min(1) })).query(async ({ input }) => {
+    proofUrl: adminProcedure.input(z7.object({ applicationRef: z7.string().min(1) })).query(async ({ input }) => {
       const key = await getMembershipApplicationProofKey(input.applicationRef);
       if (!key) throw new TRPCError7({ code: "NOT_FOUND", message: "Membership proof was not found." });
       try {
@@ -3456,13 +4049,13 @@ var managementRouter = router({
       }
     })
   }),
-  inquiries: router({ list: adminProcedure.input(limitInput).query(({ input }) => listContactInquiries(input.limit)), updateStatus: adminProcedure.input(z6.object({ inquiryRef: z6.string().min(1), status: inquiryStatus })).mutation(async ({ input }) => {
+  inquiries: router({ list: adminProcedure.input(limitInput).query(({ input }) => listContactInquiries(input.limit)), updateStatus: adminProcedure.input(z7.object({ inquiryRef: z7.string().min(1), status: inquiryStatus })).mutation(async ({ input }) => {
     await updateContactInquiryStatus(input.inquiryRef, input.status);
     return { status: input.status };
   }) }),
   volunteers: router({
-    list: adminProcedure.input(z6.object({ limit: z6.number().int().min(1).max(100).default(50), status: volunteerStatus.optional() })).query(({ input }) => listVolunteerApplications(input.limit, input.status)),
-    review: adminProcedure.input(z6.object({ applicationRef: z6.string().trim().min(6).max(40), status: volunteerStatus, reviewNotes: z6.string().trim().max(1500).optional() })).mutation(async ({ input, ctx }) => {
+    list: adminProcedure.input(z7.object({ limit: z7.number().int().min(1).max(100).default(50), status: volunteerStatus.optional() })).query(({ input }) => listVolunteerApplications(input.limit, input.status)),
+    review: adminProcedure.input(z7.object({ applicationRef: z7.string().trim().min(6).max(40), status: volunteerStatus, reviewNotes: z7.string().trim().max(1500).optional() })).mutation(async ({ input, ctx }) => {
       const application = await getVolunteerApplicationByRef(input.applicationRef);
       if (!application) throw new TRPCError7({ code: "NOT_FOUND", message: "Volunteer application was not found." });
       if (application.status === input.status) return { applicationRef: input.applicationRef, status: input.status, unchanged: true };
@@ -3474,28 +4067,28 @@ var managementRouter = router({
       return { applicationRef: input.applicationRef, status: input.status };
     })
   }),
-  donations: router({ list: adminProcedure.input(limitInput).query(({ input }) => listDonationIntents(input.limit)), updateStatus: adminProcedure.input(z6.object({ donationRef: z6.string().min(1), status: donationStatus })).mutation(async ({ input }) => {
+  donations: router({ list: adminProcedure.input(limitInput).query(({ input }) => listDonationIntents(input.limit)), updateStatus: adminProcedure.input(z7.object({ donationRef: z7.string().min(1), status: donationStatus })).mutation(async ({ input }) => {
     await updateDonationIntentStatus(input.donationRef, input.status);
     return { status: input.status };
   }) }),
   payments: router({ list: adminProcedure.input(limitInput).query(({ input }) => listPaymentTransactions(input.limit)) }),
   serviceRequests: router({
     list: adminProcedure.input(limitInput).query(({ input }) => listFoundationMemberServiceRequests(input.limit)),
-    updateStatus: adminProcedure.input(z6.object({ requestRef: z6.string().min(1).max(40), status: serviceRequestStatus, adminNote: z6.string().trim().max(1200).optional() })).mutation(async ({ input, ctx }) => {
+    updateStatus: adminProcedure.input(z7.object({ requestRef: z7.string().min(1).max(40), status: serviceRequestStatus, adminNote: z7.string().trim().max(1200).optional() })).mutation(async ({ input, ctx }) => {
       await updateMemberServiceRequestStatus({ ...input, reviewedByOpenId: ctx.user.openId });
       return { requestRef: input.requestRef, status: input.status };
     })
   }),
   completions: router({
-    list: adminProcedure.input(z6.object({ limit: z6.number().int().min(1).max(100).default(50), status: z6.enum(["submitted", "verified", "rejected", "paid"]).optional() })).query(({ input }) => listFoundationMemberServiceCompletions(input.limit, input.status)),
+    list: adminProcedure.input(z7.object({ limit: z7.number().int().min(1).max(100).default(50), status: z7.enum(["submitted", "verified", "rejected", "paid"]).optional() })).query(({ input }) => listFoundationMemberServiceCompletions(input.limit, input.status)),
     // Live queue counts power the numbered status chips on the verification page.
     stats: adminProcedure.query(() => countMemberServiceCompletionsByStatus()),
     // Recent verification/settlement moves for the activity feed; refresh
     // rides the same invalidation as stats.
-    activity: adminProcedure.input(z6.object({ limit: z6.number().int().min(1).max(30).default(12) }).default({ limit: 12 })).query(({ input }) => listMemberCompletionActivity(input.limit)),
+    activity: adminProcedure.input(z7.object({ limit: z7.number().int().min(1).max(30).default(12) }).default({ limit: 12 })).query(({ input }) => listMemberCompletionActivity(input.limit)),
     // Compliance export: one row per completion with payout outcome. Destinations
     // (UPI id / bank account) are deliberately excluded from the export.
-    exportCsv: adminProcedure.input(z6.object({ status: z6.enum(["submitted", "verified", "rejected", "paid"]).optional() }).default({})).mutation(async ({ input, ctx }) => {
+    exportCsv: adminProcedure.input(z7.object({ status: z7.enum(["submitted", "verified", "rejected", "paid"]).optional() }).default({})).mutation(async ({ input, ctx }) => {
       const rows = await listFoundationMemberServiceCompletions(100, input.status);
       const escapeCsv = (value) => {
         const text2 = value == null ? "" : String(value);
@@ -3507,7 +4100,7 @@ var managementRouter = router({
       await writeMisAuditLog({ actorOpenId: ctx.user.openId, action: "completion.exported_csv", entityType: "member_service_completion", entityId: input.status ?? "all", details: { rows: rows.length, status: input.status ?? "all" } });
       return { filename: `AASW-completions-${input.status ?? "all"}-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`, content: lines.join("\r\n") };
     }),
-    proofUrl: adminProcedure.input(z6.object({ storageKey: z6.string().trim().min(10).max(512) })).mutation(async ({ input }) => {
+    proofUrl: adminProcedure.input(z7.object({ storageKey: z7.string().trim().min(10).max(512) })).mutation(async ({ input }) => {
       if (!input.storageKey.startsWith("member-completions/")) throw new TRPCError7({ code: "BAD_REQUEST", message: "Invalid proof key." });
       try {
         return { url: await storageGetSignedUrl(input.storageKey) };
@@ -3517,7 +4110,7 @@ var managementRouter = router({
         return { url: `data:${local.mimeType};base64,${local.data.toString("base64")}` };
       }
     }),
-    verify: adminProcedure.input(z6.object({ completionRef: z6.string().trim().min(6).max(40), payoutAmount: z6.number().int().min(1e4, "Enter a payout of at least \u20B9100.").max(100 * 100 * 1e3), payoutMethod: z6.enum(["upi", "bank_transfer", "other"]), payoutNote: z6.string().trim().max(2e3).optional() })).mutation(async ({ input, ctx }) => {
+    verify: adminProcedure.input(z7.object({ completionRef: z7.string().trim().min(6).max(40), payoutAmount: z7.number().int().min(1e4, "Enter a payout of at least \u20B9100.").max(100 * 100 * 1e3), payoutMethod: z7.enum(["upi", "bank_transfer", "other"]), payoutNote: z7.string().trim().max(2e3).optional() })).mutation(async ({ input, ctx }) => {
       const verified = await verifyMemberServiceCompletion({ completionRef: input.completionRef, payoutAmount: input.payoutAmount, payoutMethod: input.payoutMethod, payoutNote: input.payoutNote, verifiedByOpenId: ctx.user.openId });
       if (!verified) throw new TRPCError7({ code: "BAD_REQUEST", message: "This completion report was already processed." });
       await writeMisAuditLog({ actorOpenId: ctx.user.openId, action: "completion.verified", entityType: "member_service_completion", entityId: input.completionRef, details: { payoutAmount: input.payoutAmount, payoutMethod: input.payoutMethod } });
@@ -3525,13 +4118,13 @@ var managementRouter = router({
       await writeMisAuditLog({ actorOpenId: ctx.user.openId, action: "completion.member_notified", entityType: "member_service_completion", entityId: input.completionRef, details: { emailKind: "payout_verified", delivery: delivery === "sent" ? "sent" : delivery === "skipped" ? "skipped_no_member_email" : "failed", error: typeof delivery === "object" ? delivery.error : void 0 } });
       return { completionRef: input.completionRef, status: "verified" };
     }),
-    reject: adminProcedure.input(z6.object({ completionRef: z6.string().trim().min(6).max(40), rejectionReason: z6.string().trim().min(10, "Tell the member why the report was rejected (at least 10 characters).").max(2e3) })).mutation(async ({ input, ctx }) => {
+    reject: adminProcedure.input(z7.object({ completionRef: z7.string().trim().min(6).max(40), rejectionReason: z7.string().trim().min(10, "Tell the member why the report was rejected (at least 10 characters).").max(2e3) })).mutation(async ({ input, ctx }) => {
       const rejected = await rejectMemberServiceCompletion({ completionRef: input.completionRef, rejectionReason: input.rejectionReason, verifiedByOpenId: ctx.user.openId });
       if (!rejected) throw new TRPCError7({ code: "BAD_REQUEST", message: "This completion report was already processed." });
       await writeMisAuditLog({ actorOpenId: ctx.user.openId, action: "completion.rejected", entityType: "member_service_completion", entityId: input.completionRef, details: { rejectionReason: input.rejectionReason } });
       return { completionRef: input.completionRef, status: "rejected" };
     }),
-    markPaid: adminProcedure.input(z6.object({ completionRef: z6.string().trim().min(6).max(40), payoutReference: z6.string().trim().min(4, "Enter the UPI or bank transfer reference number.").max(120) })).mutation(async ({ input, ctx }) => {
+    markPaid: adminProcedure.input(z7.object({ completionRef: z7.string().trim().min(6).max(40), payoutReference: z7.string().trim().min(4, "Enter the UPI or bank transfer reference number.").max(120) })).mutation(async ({ input, ctx }) => {
       const settled = await payMemberServiceCompletion({ completionRef: input.completionRef, payoutReference: input.payoutReference, paidByOpenId: ctx.user.openId });
       if (!settled) throw new TRPCError7({ code: "BAD_REQUEST", message: "Only verified completions can be marked paid." });
       await writeMisAuditLog({ actorOpenId: ctx.user.openId, action: "completion.paid", entityType: "member_service_completion", entityId: input.completionRef, details: { payoutAmount: settled.payoutAmount, payoutMethod: settled.payoutMethod, payoutReference: input.payoutReference } });
@@ -3544,21 +4137,21 @@ var managementRouter = router({
   }),
   supportMessages: router({
     list: adminProcedure.input(limitInput).query(({ input }) => listFoundationMemberSupportMessages(input.limit)),
-    respond: adminProcedure.input(z6.object({ messageRef: z6.string().min(1).max(40), status: supportMessageStatus, adminReply: z6.string().trim().max(3e3).optional() })).mutation(async ({ input, ctx }) => {
+    respond: adminProcedure.input(z7.object({ messageRef: z7.string().min(1).max(40), status: supportMessageStatus, adminReply: z7.string().trim().max(3e3).optional() })).mutation(async ({ input, ctx }) => {
       await respondToMemberSupportMessage({ ...input, repliedByOpenId: ctx.user.openId });
       return { messageRef: input.messageRef, status: input.status };
     })
   }),
   media: router({
     list: adminProcedure.input(limitInput).query(({ input }) => listGalleryMedia(input.limit)),
-    upload: adminProcedure.input(z6.object({ title: z6.string().trim().min(3).max(180), description: z6.string().trim().min(10).max(2e3), altText: z6.string().trim().min(10).max(500), quarter: z6.string().trim().min(2).max(80), displayOrder: z6.number().int().min(0).max(9999).default(0), status: mediaStatus.default("draft"), image: z6.object({ originalName: z6.string().min(1).max(255), mimeType: z6.enum(allowedImageTypes), dataBase64: z6.string().min(20) }) })).mutation(async ({ input, ctx }) => {
+    upload: adminProcedure.input(z7.object({ title: z7.string().trim().min(3).max(180), description: z7.string().trim().min(10).max(2e3), altText: z7.string().trim().min(10).max(500), quarter: z7.string().trim().min(2).max(80), displayOrder: z7.number().int().min(0).max(9999).default(0), status: mediaStatus.default("draft"), image: z7.object({ originalName: z7.string().min(1).max(255), mimeType: z7.enum(allowedImageTypes), dataBase64: z7.string().min(20) }) })).mutation(async ({ input, ctx }) => {
       const bytes = imageBuffer(input.image.dataBase64, input.image.mimeType);
       const mediaRef = `AASW-MEDIA-${nanoid5(12).toUpperCase()}`;
       const upload = await storagePut(`gallery-media/${mediaRef}/${safeFileName(input.image.originalName)}`, bytes, input.image.mimeType);
       await createGalleryMedia({ mediaRef, title: input.title, description: input.description, altText: input.altText, quarter: input.quarter, displayOrder: input.displayOrder, storageKey: upload.key, imageUrl: upload.url, originalName: input.image.originalName, mimeType: input.image.mimeType, fileSize: bytes.length, source: "manual_upload", status: input.status, uploadedByOpenId: ctx.user.openId, publishedAt: input.status === "published" ? /* @__PURE__ */ new Date() : null });
       return { mediaRef, imageUrl: upload.url, status: input.status };
     }),
-    update: adminProcedure.input(z6.object({ mediaRef: z6.string().min(1), title: z6.string().trim().min(3).max(180).optional(), description: z6.string().trim().min(10).max(2e3).optional(), altText: z6.string().trim().min(10).max(500).optional(), quarter: z6.string().trim().min(2).max(80).optional(), displayOrder: z6.number().int().min(0).max(9999).optional(), status: mediaStatus.optional() })).mutation(async ({ input }) => {
+    update: adminProcedure.input(z7.object({ mediaRef: z7.string().min(1), title: z7.string().trim().min(3).max(180).optional(), description: z7.string().trim().min(10).max(2e3).optional(), altText: z7.string().trim().min(10).max(500).optional(), quarter: z7.string().trim().min(2).max(80).optional(), displayOrder: z7.number().int().min(0).max(9999).optional(), status: mediaStatus.optional() })).mutation(async ({ input }) => {
       const { mediaRef, ...changes } = input;
       await updateGalleryMedia(mediaRef, changes);
       return { mediaRef, ...changes };
@@ -3566,7 +4159,7 @@ var managementRouter = router({
   }),
   galleryDrive: router({
     configuration: adminProcedure.query(async () => await getGalleryDriveSyncConfig() ?? null),
-    saveConfiguration: adminProcedure.input(z6.object({ folderUrl: z6.string().trim().min(10).max(1024), syncIntervalHours: z6.number().int().min(12).max(168).default(24) })).mutation(async ({ input, ctx }) => {
+    saveConfiguration: adminProcedure.input(z7.object({ folderUrl: z7.string().trim().min(10).max(1024), syncIntervalHours: z7.number().int().min(12).max(168).default(24) })).mutation(async ({ input, ctx }) => {
       const folderId = driveFolderId(input.folderUrl);
       const id = await saveGalleryDriveSyncConfig({ ...input, folderId, updatedByOpenId: ctx.user.openId });
       return { id, folderId, syncStatus: "needs_access" };
@@ -3576,7 +4169,7 @@ var managementRouter = router({
 var publicMediaRouter = router({ list: publicProcedure.input(limitInput).query(({ input }) => listGalleryMedia(input.limit, true)) });
 
 // backend/routers/assistant.ts
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
 
 // backend/_core/llm.ts
 var ensureArray = (value) => Array.isArray(value) ? value : [value];
@@ -3931,9 +4524,9 @@ function localAnswer(question) {
 
 For anything specific, the team responds fastest at **${AASW_CONTACT.email}** or ${AASW_CONTACT.primaryPhoneDisplay} (${AASW_CONTACT.officeHours}). You can also send a message from the [Contact page](/contact).`;
 }
-var chatMessageSchema = z7.object({ role: z7.enum(["user", "assistant"]), content: z7.string().trim().min(1).max(2e3) });
+var chatMessageSchema = z8.object({ role: z8.enum(["user", "assistant"]), content: z8.string().trim().min(1).max(2e3) });
 var assistantRouter = router({
-  chat: publicProcedure.input(z7.object({ messages: z7.array(chatMessageSchema).min(1).max(20) })).mutation(async ({ input }) => {
+  chat: publicProcedure.input(z8.object({ messages: z8.array(chatMessageSchema).min(1).max(20) })).mutation(async ({ input }) => {
     const lastUserMessage = [...input.messages].reverse().find((message) => message.role === "user");
     const question = lastUserMessage?.content ?? "";
     const llmConfigured = ENV.forgeApiKey.trim().length > 0;
@@ -3961,20 +4554,20 @@ import { nanoid as nanoid6 } from "nanoid";
 import { z as z9 } from "zod";
 
 // backend/email/refundNotification.ts
-import nodemailer7 from "nodemailer";
-function escapeHtml7(value) {
+import nodemailer9 from "nodemailer";
+function escapeHtml8(value) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
 }
-function formatAmount(amountInPaise) {
+function formatAmount2(amountInPaise) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amountInPaise / 100);
 }
 function createRefundProcessedMail(input) {
   const { transaction, refund } = input;
   const label = transaction.kind === "membership" ? "membership contribution" : "donation";
-  const refundedAmount = formatAmount(refund.amount);
-  const originalAmount = formatAmount(transaction.amount);
-  const safeName = escapeHtml7(transaction.supporterName);
-  const safeReason = refund.reason ? escapeHtml7(refund.reason) : "at the Foundation's discretion";
+  const refundedAmount = formatAmount2(refund.amount);
+  const originalAmount = formatAmount2(transaction.amount);
+  const safeName = escapeHtml8(transaction.supporterName);
+  const safeReason = refund.reason ? escapeHtml8(refund.reason) : "at the Foundation's discretion";
   return {
     to: transaction.supporterEmail,
     subject: `AASW Foundation refund processed \xB7 ${refund.refundRef}`,
@@ -3988,10 +4581,10 @@ Reason: ${refund.reason ?? "Not specified"}
 The amount will be returned to the original payment method, usually within 5-7 working days depending on your bank.
 
 AASW Foundation`,
-    html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:640px;margin:0 auto;padding:32px 20px"><section style="border-top:7px solid #2f6b52;background:#fffaf0;padding:34px 32px"><p style="margin:0 0 22px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">AASW Foundation \xB7 refund confirmation</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:32px;font-weight:400;line-height:1.1">A refund has been processed.</h1><p style="margin:22px 0 0;color:#5c4b47;font-size:16px;line-height:1.7">Dear ${safeName}, a refund for your ${escapeHtml7(label)} has been processed and is on its way back to your original payment method.</p><div style="margin:28px 0;padding:20px;border:1px solid #d8cfc4;background:#fffdf7"><p style="margin:0 0 6px;color:#796966;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Refund reference</p><p style="margin:0;color:#2f6b52;font-family:Georgia,serif;font-size:22px">${escapeHtml7(refund.refundRef)}</p><table role="presentation" style="width:100%;margin-top:22px;border-collapse:collapse"><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Original receipt</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${escapeHtml7(transaction.receipt)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Original amount</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${escapeHtml7(originalAmount)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Refunded amount</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:16px;font-weight:700;text-align:right">${escapeHtml7(refundedAmount)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Reason</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${safeReason}</td></tr></table></div><p style="margin:0;color:#5c4b47;font-size:14px;line-height:1.65">Bank settlement usually completes within 5-7 working days. For any question, reply to this email or write to <a href="mailto:aaswfoundation06@gmail.com" style="color:#2f6b52">aaswfoundation06@gmail.com</a>.</p></section><p style="margin:18px 0 0;color:#796966;font-size:12px;line-height:1.5">AASW Foundation \xB7 Aapka Apna Social Welfare Foundation</p></main></body></html>`
+    html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:640px;margin:0 auto;padding:32px 20px"><section style="border-top:7px solid #2f6b52;background:#fffaf0;padding:34px 32px"><p style="margin:0 0 22px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">AASW Foundation \xB7 refund confirmation</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:32px;font-weight:400;line-height:1.1">A refund has been processed.</h1><p style="margin:22px 0 0;color:#5c4b47;font-size:16px;line-height:1.7">Dear ${safeName}, a refund for your ${escapeHtml8(label)} has been processed and is on its way back to your original payment method.</p><div style="margin:28px 0;padding:20px;border:1px solid #d8cfc4;background:#fffdf7"><p style="margin:0 0 6px;color:#796966;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Refund reference</p><p style="margin:0;color:#2f6b52;font-family:Georgia,serif;font-size:22px">${escapeHtml8(refund.refundRef)}</p><table role="presentation" style="width:100%;margin-top:22px;border-collapse:collapse"><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Original receipt</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${escapeHtml8(transaction.receipt)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Original amount</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${escapeHtml8(originalAmount)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Refunded amount</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:16px;font-weight:700;text-align:right">${escapeHtml8(refundedAmount)}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Reason</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${safeReason}</td></tr></table></div><p style="margin:0;color:#5c4b47;font-size:14px;line-height:1.65">Bank settlement usually completes within 5-7 working days. For any question, reply to this email or write to <a href="mailto:aaswfoundation06@gmail.com" style="color:#2f6b52">aaswfoundation06@gmail.com</a>.</p></section><p style="margin:18px 0 0;color:#796966;font-size:12px;line-height:1.5">AASW Foundation \xB7 Aapka Apna Social Welfare Foundation</p></main></body></html>`
   };
 }
-function smtpConfig7() {
+function smtpConfig9() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT);
   const user = process.env.SMTP_USER;
@@ -3999,179 +4592,18 @@ function smtpConfig7() {
   if (!host || !port || !user || !pass) throw new Error("Refund notification sender is not configured.");
   return { host, port, user, pass };
 }
-async function deliverWithFoundationGmail7(mail) {
-  const smtp = smtpConfig7();
-  const transport = nodemailer7.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
+async function deliverWithFoundationGmail8(mail) {
+  const smtp = smtpConfig9();
+  const transport = nodemailer9.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
   return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
 }
-async function dispatchRefundProcessedEmail(input, dependencies = { deliver: deliverWithFoundationGmail7 }) {
+async function dispatchRefundProcessedEmail(input, dependencies = { deliver: deliverWithFoundationGmail8 }) {
   try {
     await dependencies.deliver(createRefundProcessedMail(input));
     return "sent";
   } catch (error) {
     return { status: "failed", error: error instanceof Error ? error.message : "Unknown refund notification error." };
   }
-}
-
-// backend/email/receipt.ts
-import nodemailer8 from "nodemailer";
-function escapeHtml8(value) {
-  return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
-}
-function formatAmount2(amountInPaise) {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amountInPaise / 100);
-}
-function isVerifiedTransaction(transaction) {
-  return transaction.status === "verified" || transaction.status === "captured";
-}
-function isReceiptEligible(transaction) {
-  return isVerifiedTransaction(transaction) && transaction.receiptDeliveryStatus === "pending";
-}
-function createDonationReceiptMail(transaction) {
-  const label = transaction.kind === "membership" ? "membership contribution" : "donation";
-  const amount2 = formatAmount2(transaction.amount);
-  const createdOn = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "long", year: "numeric" }).format(transaction.createdAt);
-  const supporterName = escapeHtml8(transaction.supporterName);
-  const receipt = escapeHtml8(transaction.receipt);
-  const safeAmount = escapeHtml8(amount2);
-  return {
-    to: transaction.supporterEmail,
-    subject: `AASW Foundation receipt \xB7 ${transaction.receipt}`,
-    text: `Dear ${transaction.supporterName},
-
-Thank you for your ${label} to AASW Foundation.
-
-Receipt reference: ${transaction.receipt}
-Amount received: ${amount2}
-Date: ${createdOn}
-
-This receipt confirms your verified payment. For support, reply to this email or write to aaswfoundation06@gmail.com.
-
-AASW Foundation`,
-    html: `<!doctype html><html lang="en"><body style="margin:0;background:#fffdf7;color:#291d1d;font-family:Arial,sans-serif"><main style="max-width:640px;margin:0 auto;padding:32px 20px"><section style="border-top:7px solid #2f6b52;background:#fffaf0;padding:34px 32px"><p style="margin:0 0 22px;color:#2f6b52;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase">AASW Foundation \xB7 verified payment receipt</p><h1 style="margin:0;color:#291d1d;font-family:Georgia,serif;font-size:34px;font-weight:400;line-height:1.05">Thank you for standing with AASW.</h1><p style="margin:22px 0 0;color:#5c4b47;font-size:16px;line-height:1.7">Dear ${supporterName}, your ${label} has been verified. This email is your payment receipt.</p><div style="margin:28px 0;padding:20px;border:1px solid #d8cfc4;background:#fffdf7"><p style="margin:0 0 6px;color:#796966;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Receipt reference</p><p style="margin:0;color:#2f6b52;font-family:Georgia,serif;font-size:24px">${receipt}</p><table role="presentation" style="width:100%;margin-top:22px;border-collapse:collapse"><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Amount received</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:16px;font-weight:700;text-align:right">${safeAmount}</td></tr><tr><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#796966;font-size:13px">Payment date</td><td style="padding:10px 0;border-top:1px solid #e5ddd4;color:#291d1d;font-size:13px;text-align:right">${escapeHtml8(createdOn)}</td></tr></table></div><p style="margin:0;color:#5c4b47;font-size:14px;line-height:1.65">For a question about this receipt, reply to this email or write to <a href="mailto:aaswfoundation06@gmail.com" style="color:#2f6b52">aaswfoundation06@gmail.com</a>.</p></section><p style="margin:18px 0 0;color:#796966;font-size:12px;line-height:1.5">AASW Foundation \xB7 Aapka Apna Social Welfare Foundation</p></main></body></html>`
-  };
-}
-function smtpConfig8() {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_APP_PASSWORD;
-  if (!host || !port || !user || !pass) throw new Error("SMTP receipt sender is not configured.");
-  return { host, port, user, pass };
-}
-async function deliverWithFoundationGmail8(mail) {
-  const smtp = smtpConfig8();
-  const transport = nodemailer8.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, requireTLS: smtp.port !== 465, auth: { user: smtp.user, pass: smtp.pass } });
-  return transport.sendMail({ from: { name: "AASW Foundation", address: smtp.user }, replyTo: smtp.user, ...mail });
-}
-async function dispatchVerifiedPaymentReceipt(transaction, dependencies = {
-  claim: claimPaymentReceiptDelivery,
-  markSent: markPaymentReceiptSent,
-  markFailed: markPaymentReceiptFailed,
-  deliver: deliverWithFoundationGmail8
-}) {
-  if (!isReceiptEligible(transaction)) return "skipped";
-  if (!await dependencies.claim(transaction.receipt)) return "skipped";
-  try {
-    const delivery = await dependencies.deliver(createDonationReceiptMail(transaction));
-    await dependencies.markSent(transaction.receipt, delivery.messageId ?? "smtp-message-id-unavailable");
-    return "sent";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown receipt delivery error.";
-    await dependencies.markFailed(transaction.receipt, message);
-    return "failed";
-  }
-}
-
-// backend/payments/razorpay.ts
-import { createHmac as createHmac2, timingSafeEqual } from "node:crypto";
-import { z as z8 } from "zod";
-var razorpayOrderSchema = z8.object({
-  id: z8.string().min(1),
-  amount: z8.number().int().positive(),
-  currency: z8.string().length(3),
-  status: z8.string()
-});
-var razorpayRefundSchema = z8.object({
-  id: z8.string().min(1),
-  amount: z8.number().int().nonnegative(),
-  status: z8.string(),
-  payment_id: z8.string().min(1)
-});
-var razorpayPaymentSchema = z8.object({
-  id: z8.string().min(1),
-  order_id: z8.string().min(1),
-  amount: z8.number().int().positive(),
-  currency: z8.string().length(3),
-  status: z8.string()
-});
-function getRazorpayConfig() {
-  const keyId = process.env.RAZORPAY_KEY_ID?.trim();
-  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
-  return keyId && keySecret ? { keyId, keySecret } : null;
-}
-function secureEqual(left, right) {
-  const leftBuffer = Buffer.from(left, "utf8");
-  const rightBuffer = Buffer.from(right, "utf8");
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-function verifyRazorpayCheckoutSignature(orderId, paymentId, signature, secret) {
-  const expected = createHmac2("sha256", secret).update(`${orderId}|${paymentId}`).digest("hex");
-  return secureEqual(expected, signature);
-}
-function verifyRazorpayWebhookSignature(rawBody, signature, webhookSecret) {
-  const expected = createHmac2("sha256", webhookSecret).update(rawBody).digest("hex");
-  return secureEqual(expected, signature);
-}
-async function createRazorpayOrder(input) {
-  const config = getRazorpayConfig();
-  if (!config) throw new Error("Razorpay live credentials are not configured.");
-  const authorization = Buffer.from(`${config.keyId}:${config.keySecret}`).toString("base64");
-  const response = await fetch("https://api.razorpay.com/v1/orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Basic ${authorization}` },
-    body: JSON.stringify({
-      amount: input.amount,
-      currency: "INR",
-      receipt: input.receipt,
-      notes: { purpose: input.kind, source: "aasw-foundation-website" }
-    })
-  });
-  if (!response.ok) {
-    const text2 = await response.text();
-    throw new Error(`Razorpay order creation failed (${response.status}): ${text2.slice(0, 300)}`);
-  }
-  return razorpayOrderSchema.parse(await response.json());
-}
-async function fetchRazorpayPayment(paymentId) {
-  const config = getRazorpayConfig();
-  if (!config) throw new Error("Razorpay live credentials are not configured.");
-  const authorization = Buffer.from(config.keyId + ":" + config.keySecret).toString("base64");
-  const response = await fetch("https://api.razorpay.com/v1/payments/" + encodeURIComponent(paymentId), {
-    headers: { Authorization: "Basic " + authorization },
-    signal: AbortSignal.timeout(1e4)
-  });
-  if (!response.ok) throw new Error("Razorpay payment lookup failed (" + response.status + ").");
-  return razorpayPaymentSchema.parse(await response.json());
-}
-async function createRazorpayRefund(input) {
-  const config = getRazorpayConfig();
-  if (!config) throw new Error("Razorpay live credentials are not configured.");
-  const authorization = Buffer.from(`${config.keyId}:${config.keySecret}`).toString("base64");
-  const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(input.paymentId)}/refund`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Basic ${authorization}` },
-    body: JSON.stringify({
-      amount: input.amount,
-      speed: "normal",
-      notes: { source: "aasw-foundation-website", ...input.reason ? { reason: input.reason.slice(0, 200) } : {} }
-    })
-  });
-  if (!response.ok) {
-    const text2 = await response.text();
-    throw new Error(`Razorpay refund creation failed (${response.status}): ${text2.slice(0, 300)}`);
-  }
-  return razorpayRefundSchema.parse(await response.json());
 }
 
 // shared/payment-demo.ts
@@ -4242,7 +4674,20 @@ var paymentRouter = router({
     } catch {
       throw new TRPCError8({ code: "BAD_GATEWAY", message: "The payment could not be confirmed with Razorpay. Please contact AASW before retrying." });
     }
-    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency || payment.status !== "captured") {
+    if (payment.order_id !== transaction.gatewayOrderId || payment.amount !== transaction.amount || payment.currency !== transaction.currency) {
+      throw new TRPCError8({ code: "PRECONDITION_FAILED", message: "Razorpay payment details did not match this order. Please contact AASW before retrying." });
+    }
+    if (payment.status === "authorized") {
+      try {
+        payment = await captureRazorpayPayment({ paymentId: input.razorpayPaymentId, amount: transaction.amount, currency: transaction.currency });
+      } catch {
+        try {
+          payment = await fetchRazorpayPayment(input.razorpayPaymentId);
+        } catch {
+        }
+      }
+    }
+    if (payment.status !== "captured") {
       throw new TRPCError8({ code: "PRECONDITION_FAILED", message: "Razorpay has not confirmed a captured payment matching this order. Please contact AASW before retrying." });
     }
     await markPaymentTransactionStatus(transaction.gatewayOrderId, "verified", input.razorpayPaymentId);
@@ -5167,13 +5612,13 @@ function buildSecurityHeaders({ isHttps, isProduction }) {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Frame-Options": "DENY",
-    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
     "Cross-Origin-Resource-Policy": "same-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()"
+    "Permissions-Policy": 'camera=(), microphone=(), geolocation=(), payment=(self "https://api.razorpay.com" "https://checkout.razorpay.com")'
   };
   if (isHttps) headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
   if (isProduction) {
-    headers["Content-Security-Policy"] = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; connect-src 'self' https:;";
+    headers["Content-Security-Policy"] = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com; connect-src 'self' https:;";
   }
   return headers;
 }
@@ -5197,6 +5642,8 @@ var rules = {
   "member.setupPassword": { id: "member.setupPassword", maxAttempts: 5, windowMs: 15 * 60 * 1e3 },
   "member.resetPassword": { id: "member.resetPassword", maxAttempts: 5, windowMs: 15 * 60 * 1e3 },
   "membership.submit": { id: "membership.submit", maxAttempts: 8, windowMs: 60 * 60 * 1e3 },
+  "membership.startPaymentCheckout": { id: "membership.startPaymentCheckout", maxAttempts: 12, windowMs: 15 * 60 * 1e3 },
+  "membership.confirmPaymentCheckout": { id: "membership.confirmPaymentCheckout", maxAttempts: 12, windowMs: 15 * 60 * 1e3 },
   "volunteer.submit": { id: "volunteer.submit", maxAttempts: 8, windowMs: 60 * 60 * 1e3 },
   "contact.submit": { id: "contact.submit", maxAttempts: 8, windowMs: 60 * 60 * 1e3 },
   "newsletter.subscribe": { id: "newsletter.subscribe", maxAttempts: 8, windowMs: 60 * 60 * 1e3 },
@@ -5401,15 +5848,15 @@ function registerOAuthRoutes(app) {
 // backend/_core/storageProxy.ts
 import fs2 from "fs";
 import path2 from "path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var rootPublicAssetKey = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
-var getBaseDir = () => typeof import.meta.dirname === "string" ? import.meta.dirname : path2.dirname(fileURLToPath2(import.meta.url));
+var getBaseDir = () => typeof import.meta.dirname === "string" ? import.meta.dirname : path2.dirname(fileURLToPath3(import.meta.url));
 function resolveLocalPublicStorageDir() {
-  const baseDir = getBaseDir();
+  const baseDir2 = getBaseDir();
   const candidates = [
-    path2.resolve(baseDir, "../../frontend/public/manus-storage"),
+    path2.resolve(baseDir2, "../../frontend/public/manus-storage"),
     // dev: backend/_core -> <root>/frontend/public/manus-storage
-    path2.resolve(baseDir, "../frontend/public/manus-storage"),
+    path2.resolve(baseDir2, "../frontend/public/manus-storage"),
     // bundled prod: dist -> <root>/frontend/public/manus-storage
     path2.resolve(process.cwd(), "frontend/public/manus-storage"),
     path2.resolve(process.cwd(), "public/manus-storage")
@@ -5424,11 +5871,11 @@ function resolveLocalPublicStorageDir() {
 }
 var localPublicStorageDir = resolveLocalPublicStorageDir();
 function resolveLocalUploadsDir() {
-  const baseDir = getBaseDir();
+  const baseDir2 = getBaseDir();
   const candidates = [
-    path2.resolve(baseDir, "../../.local-storage"),
+    path2.resolve(baseDir2, "../../.local-storage"),
     // dev: server/_core -> <root>/.local-storage
-    path2.resolve(baseDir, "../.local-storage"),
+    path2.resolve(baseDir2, "../.local-storage"),
     // bundled prod: dist -> <root>/.local-storage
     path2.resolve(process.cwd(), ".local-storage")
   ];
@@ -5966,6 +6413,9 @@ async function setupVite(app, server, port) {
     server: serverOptions,
     appType: "custom"
   });
+  app.get("/favicon.ico", (_req, res) => {
+    res.redirect(302, "/manus-storage/aasw-foundation-official-logo_41a4007d.png");
+  });
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
@@ -6095,7 +6545,8 @@ async function ensureDatabaseRunning() {
         cwd: process.cwd(),
         detached: true,
         stdio: "ignore",
-        windowsHide: true
+        windowsHide: true,
+        shell: process.platform === "win32"
       });
       dbProc.on("error", (error) => console.error("[AutoDB] Database bootstrap could not start:", error));
       dbProc.unref();

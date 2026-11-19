@@ -30,6 +30,9 @@ export async function setupVite(app: Express, server: Server, port?: number) {
     appType: "custom",
   });
 
+  app.get("/favicon.ico", (_req, res) => {
+    res.redirect(302, "/manus-storage/aasw-foundation-official-logo_41a4007d.png");
+  });
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
