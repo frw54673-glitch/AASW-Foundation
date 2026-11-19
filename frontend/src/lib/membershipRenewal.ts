@@ -25,6 +25,18 @@ export function membershipSubmissionErrorMessage(message: string, isRenewal: boo
       : "Your ID proof could not be securely uploaded. Please check the file and try again. No application has been submitted.";
   }
 
+  if (normalized.includes("razorpay payment first") || normalized.includes("completing razorpay")) {
+    return "Membership activation requires completing the Razorpay payment first. Please wait for payment options to load or try again.";
+  }
+
+  if (normalized.includes("database is unavailable") || normalized.includes("database not available") || normalized.includes("cannot verify membership eligibility")) {
+    return "The server database is temporarily unavailable. Please check the server DATABASE_URL configuration or contact AASW Foundation.";
+  }
+
+  if (message && message.trim() && !normalized.includes("failed to fetch") && !normalized.includes("networkerror")) {
+    return message;
+  }
+
   return isRenewal
     ? "We could not record your renewal right now. Please check your connection and try again. If the problem continues, contact AASW Foundation."
     : "We could not submit your membership application right now. Please check your connection and try again.";
