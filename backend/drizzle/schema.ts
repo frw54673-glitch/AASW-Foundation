@@ -391,7 +391,7 @@ export const newsletterSubscribers = mysqlTable("newsletter_subscribers", {
   status: mysqlEnum("status", ["subscribed", "unsubscribed"]).notNull().default("subscribed"),
   consentAt: timestamp("consentAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
 export const volunteerApplications = mysqlTable("volunteer_applications", {
